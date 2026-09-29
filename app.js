@@ -53,9 +53,9 @@
     {key:'hiddenTruth',title:'Hidden Truth',kicker:'WHO SAID THAT?',glyph:'◎',color:'#f99bcf',description:'Everyone leaves one harmless true fact without a name. Match each fact to the friend who shared it.',rules:['Write one true, low-stakes fact.','Guess which friend wrote each anonymous fact.','Score for recognizing your people.']},
     {key:'readRoom',title:'Read the Room',kicker:'PREDICT THE GROUP',glyph:'◉',color:'#7db5ff',description:'Make a private A/B choice, predict what the group will choose, then see whether your read was right.',rules:['Everyone privately picks A or B.','Before the reveal, predict the room’s majority.','Correct majority predictions earn points.']}
   ];
-  let selectedGame = 'psych', deck = 'odd', remoteDeck = 'odd', mode = 'local', game = null, currentPlayerId = null, localAnswerIndex = 0, localVoteIndex = 0, localGate = false, pendingVotes = {}, onlineDraftText = '', onlineDraftTruth = true, onlineDraftVotes = {}, poller = null, remoteSession = null, targetFocus = -1;
+  let selectedGame = 'psych', deck = 'odd', remoteDeck = 'odd', mode = 'local', game = null, currentPlayerId = null, localAnswerIndex = 0, localVoteIndex = 0, localGate = false, pendingVotes = {}, onlineDraftText = '', onlineDraftTruth = true, onlineDraftVotes = {}, onlineDraftForm = {}, poller = null, remoteSession = null, targetFocus = -1;
   const usedPrompts = new Set();
-  const savedSession = code => { try { return JSON.parse(localStorage.getItem(`afterlight-room-${code}`) || 'null'); } catch { return null; } };
+  const savedSession = code => { try { return JSON.parse(localStorage.getItem(`testhem-room-${code}`) || 'null'); } catch { return null; } };
   const makeId = () => { if (globalThis.crypto?.randomUUID) return crypto.randomUUID(); const b = Array.from({length:16}, () => Math.floor(Math.random()*256)); b[6]=(b[6]&15)|64; b[8]=(b[8]&63)|128; const h=b.map(x=>x.toString(16).padStart(2,'0')).join(''); return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const toast = msg => { const el = $('#toast'); el.textContent = msg; el.classList.add('show'); clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.remove('show'), 2600); };
@@ -77,7 +77,7 @@
   updateClock(); setInterval(updateClock, 30000);
 
   // Each visit starts with a named host; the name is kept on this device for a personal welcome.
-  let userName='';try{userName=(localStorage.getItem('testhem-player-name')||localStorage.getItem('afterlight-player-name')||'').trim().slice(0,18);}catch{}
+  let userName='';try{userName=(localStorage.getItem('testhem-player-name')||'').trim().slice(0,18);}catch{}
   let resumeRoomAfterIdentity=false;let names=userName?[userName]:[];
   function paintNames(){
     $('#playerList').innerHTML=names.map((n,i)=>`<span class="player-chip ${i===0?'host-chip':''}">${esc(n)}${i===0?'<small>YOU</small>':''}<button type="button" aria-label="Remove ${esc(n)}" data-remove="${i}" ${i===0?'disabled title="Your seat stays at the table"':''}>×</button></span>`).join('');
@@ -146,6 +146,11 @@
     if(type==='hiddenTruth')return ['HIDDEN TRUTH','Write one harmless, real fact about yourself.','Keep it one sentence. Your crew will guess who wrote it.'];
     return ['QUESTION JAR','Draw a question, share a story—or pass.','The group will vote for the answer that surprised them most.'];
   }
+  function remoteRoundData(type, deckChoice='odd'){
+    const data={gameType:type,prompt:type==='psych'?pickPrompt(deckChoice):pickGamePrompt(type),deck:deckChoice};
+    if(type==='threeQ')data.questionSet=threeQuestionSets[Math.floor(Math.random()*threeQuestionSets.length)];
+    return data;
+  }
   // The main CTA is wired to the spatial world picker above; no page-scroll navigation.
   $$('[data-demo]').forEach(btn => btn.addEventListener('click', () => {
     const guessed = btn.dataset.demo === 'true'; const result = $('#demoResult');
@@ -164,7 +169,7 @@
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#gameOverlay').classList.contains('open')) overlayClose(); });
 
   function onlineError(msg) { $('#onlineError').textContent = msg; }
-  const config = () => window.TESTHEM_CONFIG || window.AFTERLIGHT_CONFIG || {};
+  const config = () => window.TESTHEM_CONFIG || {};
   const publicApiKey = () => config().supabasePublishableKey || config().supabaseAnonKey;
   if (config().supabaseUrl && publicApiKey()) $('#backendNote').textContent = 'ONLINE ROOMS CONNECTED · INVITES ARE PRIVATE LINKS';
   async function rpc(name, params) {
@@ -193,7 +198,7 @@
     if(!config().supabaseUrl||!publicApiKey()){$('#guestbookStatus').textContent='The wall is not connected yet. Games still work locally; add the Supabase URL/key and run the mark-wall migration to enable public marks.';$('#guestbookList').replaceChildren();return;}
     $('#guestbookStatus').textContent='FETCHING THE LATEST MARKS…';
     try{const data=await rpc('testhem_get_marks',{p_limit:40});const marks=Array.isArray(data?.marks)?data.marks:[];paintMarks(marks);markWallReady=true;$('#markSubmit').disabled=false;$('#guestbookStatus').textContent=`${marks.length} ${marks.length===1?'MARK':'MARKS'} FROM THE COMMUNITY`;}
-    catch(e){$('#guestbookStatus').textContent='THE WALL IS NOT READY';$('#markError').textContent=`${e.message} If the room schema already exists, run supabase-guestbook-migration.sql in Supabase SQL Editor.`;$('#guestbookList').replaceChildren();}
+    catch(e){$('#guestbookStatus').textContent='THE WALL IS NOT READY';$('#markError').textContent=`${e.message} Run supabase-schema.sql in the Supabase SQL Editor to install the rooms and mark wall.`;$('#guestbookList').replaceChildren();}
   }
   $('#guestbookOpen').addEventListener('click',openGuestbook);$('#guestbookClose').addEventListener('click',closeGuestbook);
   $('#guestbookPanel').addEventListener('click',e=>{if(e.target===$('#guestbookPanel'))closeGuestbook();});
@@ -218,37 +223,38 @@
     if (match) return { code: match[1].toUpperCase(), key: match[2] };
     return { code: raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6), key: '' };
   }
-  function cacheRoom(session) { localStorage.setItem(`afterlight-room-${session.code}`, JSON.stringify(session)); }
-  function setRemoteRoom(session, state) { closeSetup(); remoteSession = session; currentPlayerId = session.playerId; remoteDeck = state.deck || 'odd'; onlineDraftText = ''; onlineDraftTruth = true; onlineDraftVotes = {}; game = { ...state, mode: 'online' }; overlayOpen(); render(); clearInterval(poller); poller = setInterval(loadRemote, 1800); }
+  function cacheRoom(session) { localStorage.setItem(`testhem-room-${session.code}`, JSON.stringify(session)); }
+  function setRemoteRoom(session, state) { closeSetup(); remoteSession = session; currentPlayerId = session.playerId; remoteDeck = state.deck || 'odd'; selectedGame = state.gameType || 'psych'; $('#setupGameTitle').textContent = gameCatalog.find(m=>m.key===selectedGame)?.title || 'Psych! The Truth Bluff'; onlineDraftText = ''; onlineDraftTruth = true; onlineDraftVotes = {}; onlineDraftForm = {}; game = { ...state, mode: 'online' }; overlayOpen(); render(); clearInterval(poller); poller = setInterval(loadRemote, 1800); }
   async function loadRemote() {
     if (!remoteSession) return;
-    try { const view = await rpc('afterlight_get_room', { p_code: remoteSession.code, p_room_key: remoteSession.key, p_player_id: remoteSession.playerId }); const next = { ...view, mode: 'online' }; if (JSON.stringify(next) !== JSON.stringify(game)) { game = next; render(); } }
+    try { const view = await rpc('testhem_get_room', { p_code: remoteSession.code, p_room_key: remoteSession.key, p_player_id: remoteSession.playerId }); const next = { ...view, mode: 'online' }; if (JSON.stringify(next) !== JSON.stringify(game)) { game = next; render(); } }
     catch (e) { $('#gameContent').innerHTML = `<div class="online-wait"><strong>RECONNECTING TO THE ROOM</strong>${esc(e.message)}</div>`; }
   }
   async function onlineAction(action, data = {}) {
     if (!remoteSession) return;
-    try { const view = await rpc('afterlight_game_action', { p_code: remoteSession.code, p_room_key: remoteSession.key, p_player_id: remoteSession.playerId, p_action: action, p_data: data }); if (action === 'submit') { onlineDraftText = ''; onlineDraftTruth = true; } if (action === 'vote') onlineDraftVotes = {}; game = { ...view, mode: 'online' }; render(); }
+    try { const view = await rpc('testhem_game_action', { p_code: remoteSession.code, p_room_key: remoteSession.key, p_player_id: remoteSession.playerId, p_action: action, p_data: data }); if (action === 'submit') { onlineDraftText = ''; onlineDraftTruth = true; onlineDraftForm = {}; } if (action === 'vote') onlineDraftVotes = {}; game = { ...view, mode: 'online' }; render(); }
     catch (e) { toast(e.message); }
   }
   async function createOnline() {
-    onlineError(''); if(selectedGame!=='psych')return onlineError('Online rooms currently run Psych! The Truth Bluff. Pick it in the 3D game deck, or play this mode in the same room.'); const name = $('#onlineName').value.trim().slice(0, 18); if (!name) return onlineError('Choose a player name first.');
+    onlineError(''); const name = $('#onlineName').value.trim().slice(0, 18); if (!name) return onlineError('Choose a player name first.');
     const id = makeId();
     try {
-      const out = await rpc('afterlight_create_room', { p_host_id: id, p_host_name: name });
+      const out = await rpc('testhem_create_room', { p_host_id: id, p_host_name: name });
       const session = { code: out.code, key: out.key, playerId: id, name, host: true }; cacheRoom(session);
       const joinHash = `#join=${encodeURIComponent(out.code)}&key=${encodeURIComponent(out.key)}`; history.replaceState(null, '', location.pathname + location.search + joinHash);
-      setRemoteRoom(session, out.state);
+      const state = await rpc('testhem_set_room_game', { p_code: out.code, p_room_key: out.key, p_player_id: id, p_game_type: selectedGame });
+      setRemoteRoom(session, state);
     } catch (e) { onlineError(e.message); }
   }
   async function joinOnline() {
-    onlineError(''); if(selectedGame!=='psych')return onlineError('Online invites currently support Psych! The Truth Bluff. Pick that mode first, or use the same-room version.'); const invite = parseInvite($('#roomInvite').value); const name = $('#onlineName').value.trim().slice(0, 18);
+    onlineError(''); const invite = parseInvite($('#roomInvite').value); const name = $('#onlineName').value.trim().slice(0, 18);
     if (!name) return onlineError('Enter your name above first.'); if (!invite?.code) return onlineError('Paste a room invite link or code.');
     let key = invite.key;
     const old = savedSession(invite.code); if (!key && old?.key) key = old.key;
     if (!key) return onlineError('Paste the full private invite link—not only the six-letter code.');
     const id = old?.playerId || makeId();
     try {
-      const state = await rpc('afterlight_join_room', { p_code: invite.code, p_room_key: key, p_player_id: id, p_player_name: name });
+      const state = await rpc('testhem_join_room', { p_code: invite.code, p_room_key: key, p_player_id: id, p_player_name: name });
       const session = { code: invite.code, key, playerId: id, name, host: false }; cacheRoom(session);
       history.replaceState(null, '', location.pathname + location.search + `#join=${encodeURIComponent(invite.code)}&key=${encodeURIComponent(key)}`);
       setRemoteRoom(session, state);
@@ -384,23 +390,67 @@
     const scoring={psych:'Correct reads earn a point; bluffers score for every friend they fooled.',twoTruths:'Spot the lie for a point. If you miss it, the storyteller gets the point.',wyr:'Each correct prediction of a friend’s choice is one point.',threeQ:'Spot the invented answer for a point. Miss it and the player gets the point.',questionJar:'The most-voted answer earns 2 points. Or ignore the score and keep talking.',hiddenTruth:'Correctly name the author for a point. A missed fact gives its author a point.',readRoom:'Call the group majority correctly and score a point.'}[type];
     const canNext=game.mode!=='online'||currentPlayerId===game.hostId;
     root.innerHTML=`<div class="game-eyebrow">${label} · ROUND ${game.round}</div><h2>${type==='questionJar'?'The best bits stay with you.':'Did you read them right?'}</h2><p class="game-sub">${scoring}</p><div class="scoreboard">${board.map(p=>`<span class="score-chip">${esc(p.name)} <b>${p.now}</b></span>`).join('')}</div><div>${rows}</div><div class="game-actions">${canNext?'<button class="button-primary" id="nextRound">RUN IT BACK <span>↗</span></button>':'<span class="online-wait"><strong>ROUND SCORES LOCKED</strong>The host can start another round whenever the crew is ready.</span>'}<button class="button-secondary" id="closeResults">BACK TO THE GAME DECK</button></div>`;
-    $('#nextRound')?.addEventListener('click',async()=>{if(game.mode==='online'){const next=pickPrompt(game.deck||'odd');await onlineAction('start',{prompt:next,deck:game.deck||'odd'});}else{game.players.forEach(p=>{p.score=(p.score||0)+(points[p.id]||0);});game.round++;game.prompt=pickGamePrompt(game.gameType);game.questionSet=game.gameType==='threeQ'?threeQuestionSets[Math.floor(Math.random()*threeQuestionSets.length)]:null;game.jarQuestions={};game.submissions=[];game.votes=[];localAnswerIndex=0;localVoteIndex=0;localGate=false;pendingVotes={};game.stage='answer';render();}});
+    $('#nextRound')?.addEventListener('click',async()=>{if(game.mode==='online'){await onlineAction('start',remoteRoundData(game.gameType||'psych',game.deck||'odd'));}else{game.players.forEach(p=>{p.score=(p.score||0)+(points[p.id]||0);});game.round++;game.prompt=pickGamePrompt(game.gameType);game.questionSet=game.gameType==='threeQ'?threeQuestionSets[Math.floor(Math.random()*threeQuestionSets.length)]:null;game.jarQuestions={};game.submissions=[];game.votes=[];localAnswerIndex=0;localVoteIndex=0;localGate=false;pendingVotes={};game.stage='answer';render();}});
     $('#closeResults').addEventListener('click',()=>{overlayClose();resetWorld();});
   }
 
+  function bindOnlineDraftFields(root){$$('[data-online-draft]',root).forEach(el=>{const key=el.dataset.onlineDraft;el.value=onlineDraftForm[key]??'';el.addEventListener('input',()=>{onlineDraftForm[key]=el.value;});});}
+  function renderOnlineOtherAnswer(root){
+    const type=game.gameType||'psych';
+    const formField=(key,placeholder,max=150)=>`<textarea class="game-textarea" data-online-draft="${key}" maxlength="${max}" placeholder="${esc(placeholder)}"></textarea>`;
+    const actions=(button='SEAL MY ANSWER')=>`<div class="game-actions"><button class="button-primary" id="sendOnlineOther">${button} <span>↗</span></button><button class="button-secondary" id="passOnlineOther">PASS THIS ROUND</button></div>`;
+    if(type==='twoTruths'||type==='threeQ'){
+      const prompts=type==='threeQ'?game.questionSet:['Statement one','Statement two','Statement three'];
+      root.innerHTML=`<div class="game-eyebrow">${type==='twoTruths'?'TWO TRUTHS & A LIE':'THREE QUESTIONS · ONE BLUFF'}</div><h2>Write three. Hide one lie.</h2><p class="game-sub">Your lines stay private until everyone has answered. Passing is always fine.</p><div class="statement-list">${prompts.map((q,i)=>`<div class="statement-entry"><label><span>0${i+1}</span>${esc(q)}</label>${formField(`item${i}`,type==='twoTruths'?'Write a short statement…':'Your answer…')}</div>`).join('')}<div class="truth-choice">${[0,1,2].map(i=>`<button type="button" data-online-lie="${i}" class="${String(onlineDraftForm.lieIndex)===String(i)?'chosen':''}">⌁ &nbsp;LINE 0${i+1} IS THE LIE</button>`).join('')}</div></div>${actions('LOCK MY THREE')}`;
+      bindOnlineDraftFields(root);$$('[data-online-lie]',root).forEach(b=>b.addEventListener('click',()=>{onlineDraftForm.lieIndex=b.dataset.onlineLie;$$('[data-online-lie]',root).forEach(x=>x.classList.toggle('chosen',x===b));}));
+      $('#sendOnlineOther').addEventListener('click',async()=>{const items=[0,1,2].map(i=>(onlineDraftForm[`item${i}`]||'').trim()),lie_index=Number(onlineDraftForm.lieIndex);if(items.some(x=>x.length<2))return toast('Fill in all three lines.');if(![0,1,2].includes(lie_index))return toast('Mark which line is the lie.');await onlineAction('submit',{items,lie_index});});
+    }else if(type==='wyr'||type==='readRoom'){
+      const [, , ,a,b]=game.prompt;root.innerHTML=`<div class="game-eyebrow">${type==='wyr'?'WOULD YOU RATHER?':'READ THE ROOM'} · PRIVATE PICK</div><h2>${type==='wyr'?'Choose your fate.':'What’s your answer?'}</h2>${promptMarkup()}<div class="choice-pair"><button data-online-choice="A" class="${onlineDraftForm.choice==='A'?'selected':''}"><b>A</b><span>${esc(a)}</span></button><button data-online-choice="B" class="${onlineDraftForm.choice==='B'?'selected':''}"><b>B</b><span>${esc(b)}</span></button></div>${type==='wyr'?`<label class="reason-label">SELL YOUR CHOICE IN ONE LINE</label>${formField('reason','Why is this the better option?',120)}`:''}${actions(type==='wyr'?'SEAL MY PICK':'LOCK MY PICK')}`;
+      bindOnlineDraftFields(root);$$('[data-online-choice]',root).forEach(b=>b.addEventListener('click',()=>{onlineDraftForm.choice=b.dataset.onlineChoice;$$('[data-online-choice]',root).forEach(x=>x.classList.toggle('selected',x===b));}));
+      $('#sendOnlineOther').addEventListener('click',async()=>{const choice=onlineDraftForm.choice;if(!choice)return toast('Pick A or B.');if(type==='wyr'){const text=(onlineDraftForm.reason||'').trim();if(text.length<2)return toast('Give your crew a short reason.');await onlineAction('submit',{choice,text});}else await onlineAction('submit',{choice});});
+    }else if(type==='hiddenTruth'){
+      root.innerHTML=`<div class="game-eyebrow">HIDDEN TRUTH · ONE SENTENCE, NO NAMES</div><h2>Leave one real clue.</h2>${promptMarkup()}<div class="game-form">${formField('text','A harmless fact your friends may not know…',150)}${actions('SEAL THE FACT')}</div>`;bindOnlineDraftFields(root);$('#sendOnlineOther').addEventListener('click',async()=>{const text=(onlineDraftForm.text||'').trim();if(text.length<4)return toast('Write a few words, or pass.');await onlineAction('submit',{text});});
+    }else if(type==='questionJar'){
+      if(!onlineDraftForm.question)onlineDraftForm.question=jarPrompts[Math.floor(Math.random()*jarPrompts.length)];
+      root.innerHTML=`<div class="game-eyebrow">QUESTION JAR · DRAWN FOR YOU</div><h2>Answer, pass, or spin.</h2><div class="game-prompt"><small>YOUR QUESTION</small><strong>${esc(onlineDraftForm.question)}</strong><em>Share only what feels good. You can pass without explaining.</em></div><div class="game-form">${formField('jarAnswer','Your answer…',180)}${actions('DROP IT IN')}</div>`;bindOnlineDraftFields(root);$('#sendOnlineOther').addEventListener('click',async()=>{const text=(onlineDraftForm.jarAnswer||'').trim();if(text.length<2)return toast('Write a few words, or pass.');await onlineAction('submit',{question:onlineDraftForm.question,text});});
+    }
+    $('#passOnlineOther').addEventListener('click',()=>onlineAction('submit',{is_pass:true}));
+  }
+  function renderOnlineOtherVote(root){
+    const type=game.gameType||'psych',mine=game.myVotes||[],targets=game.submissions||[],pending={...onlineDraftVotes};
+    if(mine.length>=(game.myExpectedVotes||0)&&game.myExpectedVotes!==undefined){root.innerHTML=`<div class="game-eyebrow">BALLOT LOCKED · ${game.voteCount}/${game.expectedVotes} IN</div><h2>Your guesses are sealed.</h2><div class="online-wait"><strong>WAITING FOR EVERY ORBIT</strong>The reveal opens when the room has finished voting.</div><div class="progress-rail"><i style="width:${game.expectedVotes?game.voteCount/game.expectedVotes*100:100}%"></i></div><div class="progress-label">${game.voteCount} OF ${game.expectedVotes} VOTES CAST</div>`;return;}
+    if(type==='readRoom'){
+      const [, , ,a,b]=game.prompt;root.innerHTML=`<div class="game-eyebrow">READ THE ROOM · ${game.voteCount}/${game.expectedVotes} PREDICTIONS IN</div><h2>What did the room choose?</h2><p class="game-sub">Your pick is private. Guess which option won the room.</p><div class="choice-pair"><button data-online-majority="A"><b>A</b><span>${esc(a)}</span></button><button data-online-majority="B"><b>B</b><span>${esc(b)}</span></button></div><div class="game-actions"><button class="button-primary" id="sendOnlineVote">LOCK MY PREDICTION <span>↗</span></button></div>`;
+      let choice='';$$('[data-online-majority]',root).forEach(b=>b.addEventListener('click',()=>{choice=b.dataset.onlineMajority;$$('[data-online-majority]',root).forEach(x=>x.classList.toggle('selected',x===b));}));$('#sendOnlineVote').addEventListener('click',()=>choice?onlineAction('vote',{guess_majority:choice}):toast('Choose A or B.'));return;
+    }
+    if(type==='questionJar'){
+      root.innerHTML=`<div class="game-eyebrow">QUESTION JAR · ${game.voteCount}/${game.expectedVotes} PICKS IN</div><h2>Which answer stays with you?</h2><div class="answer-grid">${targets.map((s,i)=>`<button class="answer-card" data-jar-target="${esc(s.id)}"><p>“${esc(s.text)}”</p><span class="anonymous">QUESTION · ${esc(s.question||'')}</span></button>`).join('')}</div>`;
+      $$('[data-jar-target]',root).forEach(b=>b.addEventListener('click',()=>onlineAction('vote',{submission_id:b.dataset.jarTarget})));return;
+    }
+    const typeLabel=type==='twoTruths'?'WHICH LINE IS THE LIE?':type==='threeQ'?'WHICH ANSWER IS MADE UP?':type==='wyr'?'PREDICT THEIR PICK':'WHO WROTE THIS?';
+    root.innerHTML=`<div class="game-eyebrow">${typeLabel} · ${game.voteCount}/${game.expectedVotes} GUESSES IN</div><h2>Make your calls.</h2><p class="game-sub">Answers are anonymous. You will not see your own answer here.</p><div class="answer-grid">${targets.map((s,i)=>{
+      const prior=mine.find(v=>v.submission_id===s.id);const choice=prior?(type==='twoTruths'||type==='threeQ'?prior.guess_index:type==='wyr'?prior.guess_choice:prior.guess_player_id):pending[s.id];if(prior)pending[s.id]=choice;
+      const body=(type==='twoTruths'||type==='threeQ')?(s.items||[]).map((t,j)=>`<button class="statement-vote ${String(choice)===String(j)?'selected':''}" data-online-target="${esc(s.id)}" data-online-value="${j}"><b>0${j+1}</b> ${esc(t)}</button>`).join(''):type==='wyr'?`<p>“${esc(s.text)}”</p><div class="vote-control"><button data-online-target="${esc(s.id)}" data-online-value="A" class="${choice==='A'?'selected':''}">PICK A</button><button data-online-target="${esc(s.id)}" data-online-value="B" class="${choice==='B'?'selected':''}">PICK B</button></div>`:`<p>“${esc(s.text)}”</p><select class="online-author-select" data-online-target="${esc(s.id)}"><option value="">Who wrote it?</option>${game.players.filter(p=>p.id!==currentPlayerId).map(p=>`<option value="${esc(p.id)}" ${choice===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`;
+      return `<article class="answer-card" data-online-card="${esc(s.id)}">${body}<span class="anonymous">TRANSMISSION ${String(i+1).padStart(2,'0')}</span></article>`;
+    }).join('')}</div><div class="game-actions"><button class="button-primary" id="castOtherVotes">LOCK MY GUESSES <span>↗</span></button></div>`;
+    $$('[data-online-target][data-online-value]',root).forEach(b=>b.addEventListener('click',()=>{const id=b.dataset.onlineTarget;pending[id]=(type==='twoTruths'||type==='threeQ')?Number(b.dataset.onlineValue):b.dataset.onlineValue;onlineDraftVotes[id]=pending[id];$$(`[data-online-card="${CSS.escape(id)}"] [data-online-value]`,root).forEach(x=>x.classList.toggle('selected',x===b));}));
+    $$('select[data-online-target]',root).forEach(sel=>sel.addEventListener('change',()=>{pending[sel.dataset.onlineTarget]=sel.value;onlineDraftVotes[sel.dataset.onlineTarget]=sel.value;}));
+    $('#castOtherVotes').addEventListener('click',()=>{if(targets.some(s=>pending[s.id]===undefined||pending[s.id]===''))return toast('Make a guess for every answer.');const votes=targets.map(s=>{const v={submission_id:s.id};if(type==='twoTruths'||type==='threeQ')v.guess_index=pending[s.id];else if(type==='wyr')v.guess_choice=pending[s.id];else v.guess_player_id=pending[s.id];return v;});onlineAction('vote',{votes});});
+  }
   function renderOnline(root) {
     if (game.stage === 'lobby') {
       const isHost = currentPlayerId === game.hostId;
       const url = `${location.origin}${location.pathname}${location.search}#join=${encodeURIComponent(remoteSession.code)}&key=${encodeURIComponent(remoteSession.key)}`;
-      root.innerHTML = `<div class="game-eyebrow">PRIVATE ONLINE ORBIT · ROOM ${esc(remoteSession.code)}</div><h2>${isHost ? 'Your room is open.' : 'You made it.'}</h2><p class="game-sub">Send the invite to your friends. Two or more players to start. Answers stay hidden until everyone is ready.</p><div class="online-code">${esc(remoteSession.code)} <button class="button-secondary" id="copyInvite">COPY INVITE LINK</button></div><div class="scoreboard">${game.players.map(p => `<span class="score-chip">${esc(p.name)}${p.id === game.hostId ? ' · HOST' : ''}</span>`).join('')}</div>${isHost ? `<div class="deck-picker"><span class="small-label">CHOOSE A DECK FOR ROUND ONE</span><div class="deck-options">${[['odd','ODDLY SPECIFIC'],['deep','DEEP ORBIT'],['either','WOULD YOU RATHER']].map(([k,v])=>`<button class="deck-option ${k===remoteDeck?'selected':''}" data-remote-deck="${k}">${v}</button>`).join('')}</div></div><div class="game-actions"><button class="button-primary" id="startOnlineRound" ${game.players.length<2?'disabled':''}>START THE ROUND <span>↗</span></button></div>` : `<div class="online-wait"><strong>WAITING FOR THE HOST</strong>The host will light the fuse when everyone is here.</div>`}<p class="setup-error" id="roomInlineError"></p>`;
+      root.innerHTML = `<div class="game-eyebrow">${esc(gameCatalog.find(m=>m.key===game.gameType)?.title||'PSYCH!')} · PRIVATE ROOM ${esc(remoteSession.code)}</div><h2>${isHost ? 'Your room is open.' : 'You made it.'}</h2><p class="game-sub">Invite friends anywhere. Each person joins on their own phone or computer. Two or more players to start; answers stay hidden until the reveal.</p><div class="online-code">${esc(remoteSession.code)} <button class="button-secondary" id="copyInvite">COPY INVITE LINK</button></div><div class="scoreboard">${game.players.map(p => `<span class="score-chip">${esc(p.name)}${p.id === game.hostId ? ' · HOST' : ''}</span>`).join('')}</div>${isHost ? `<div class="deck-picker"><span class="small-label">CHOOSE A DECK FOR ROUND ONE</span><div class="deck-options">${[['odd','ODDLY SPECIFIC'],['deep','DEEP ORBIT'],['either','WOULD YOU RATHER']].map(([k,v])=>`<button class="deck-option ${k===remoteDeck?'selected':''}" data-remote-deck="${k}">${v}</button>`).join('')}</div></div><div class="game-actions"><button class="button-primary" id="startOnlineRound" ${game.players.length<2?'disabled':''}>START THE ROUND <span>↗</span></button></div>` : `<div class="online-wait"><strong>WAITING FOR THE HOST</strong>The host will light the fuse when everyone is here.</div>`}<p class="setup-error" id="roomInlineError"></p>`;
       $('#copyInvite')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(url); toast('Private invite copied. Send it to your crew.'); } catch { toast(url); } });
       $$('[data-remote-deck]', root).forEach(b => b.addEventListener('click', () => { remoteDeck = b.dataset.remoteDeck; $$('[data-remote-deck]', root).forEach(x => x.classList.toggle('selected', x === b)); }));
-      $('#startOnlineRound')?.addEventListener('click', async () => { const prompt = pickPrompt(remoteDeck); await onlineAction('start', { prompt, deck: remoteDeck }); });
+      $('#startOnlineRound')?.addEventListener('click', async () => { await onlineAction('start', remoteRoundData(game.gameType||selectedGame,remoteDeck)); });
       return;
     }
     if (game.stage === 'answer') {
-      const mine = game.submissions?.find(s => s.player_id === currentPlayerId);
+      const mine = game.mySubmitted || game.submissions?.find(s => s.player_id === currentPlayerId);
       if (mine) { root.innerHTML = `<div class="game-eyebrow">ANSWER RECEIVED · ${game.submissionCount}/${game.players.length}</div><h2>You're in the mix.</h2><div class="online-wait"><strong>WAITING FOR YOUR ORBIT</strong>Your friends are writing their answers. No one can see yours until the reveal.</div><div class="progress-rail"><i style="width:${(game.submissionCount/game.players.length)*100}%"></i></div><div class="progress-label">${game.submissionCount} OF ${game.players.length} ANSWERS LOCKED</div>`; return; }
+      if((game.gameType||'psych')!=='psych')return renderOnlineOtherAnswer(root);
       root.innerHTML = `<div class="game-eyebrow">ONLINE ROUND ${game.round} · ${game.submissionCount}/${game.players.length} ANSWERS IN</div><h2>Your call: true or bluff?</h2><p class="game-sub">Everyone else is writing too. Your answer stays sealed until the whole room is ready.</p>${promptMarkup()}<div class="game-form"><textarea id="onlineAnswer" maxlength="180" placeholder="Write your answer... (or pass)"></textarea><div class="truth-choice"><button class="${onlineDraftTruth?'chosen':''}" data-online-truth="true">✦ &nbsp;THIS IS TRUE</button><button class="${!onlineDraftTruth?'chosen':''}" data-online-truth="false">⌁ &nbsp;I MADE IT UP</button></div><div class="game-actions"><button class="button-primary" id="sendOnlineAnswer">SEAL MY ANSWER <span>↗</span></button><button class="button-secondary" id="passOnline">PASS</button></div></div>`;
       $('#onlineAnswer').value = onlineDraftText; $('#onlineAnswer').addEventListener('input', e => { onlineDraftText = e.target.value; });
       $$('[data-online-truth]', root).forEach(b => b.addEventListener('click', () => { $$('[data-online-truth]', root).forEach(x => x.classList.remove('chosen')); b.classList.add('chosen'); onlineDraftTruth = b.dataset.onlineTruth === 'true'; }));
@@ -408,6 +458,7 @@
       $('#passOnline').addEventListener('click', async () => onlineAction('submit', { is_pass: true })); return;
     }
     if (game.stage === 'vote') {
+      if((game.gameType||'psych')!=='psych')return renderOnlineOtherVote(root);
       const mine = game.myVotes || []; const mineIds = new Set(mine.map(v => v.submission_id));
       if (mine.length >= (game.myExpectedVotes || 0) && game.myExpectedVotes !== undefined) { root.innerHTML = `<div class="game-eyebrow">BALLOT LOCKED · ${game.voteCount}/${game.expectedVotes} GUESSES IN</div><h2>You're a good secret-keeper.</h2><div class="online-wait"><strong>WAITING FOR THE ROOM TO VOTE</strong>Answers are still anonymous. The reveal happens once everyone is done.</div><div class="progress-rail"><i style="width:${game.expectedVotes ? game.voteCount/game.expectedVotes*100 : 100}%"></i></div><div class="progress-label">${game.voteCount} OF ${game.expectedVotes} VOTES CAST</div>`; return; }
       const targets = (game.submissions || []).filter(s => !(game.ownSubmissionIds || []).includes(s.id));
@@ -425,7 +476,7 @@
     const params = new URLSearchParams(location.hash.replace(/^#/, '')); const code = params.get('join'); const key = params.get('key');
     if (!code || !key) return;
     const prior = savedSession(code);
-    if (prior) { remoteSession = prior; currentPlayerId = prior.playerId; rpc('afterlight_get_room', { p_code: prior.code, p_room_key: prior.key, p_player_id: prior.playerId }).then(state => setRemoteRoom(prior, state)).catch(() => { $('#roomInvite').value = location.href; }); }
+    if (prior) { remoteSession = prior; currentPlayerId = prior.playerId; rpc('testhem_get_room', { p_code: prior.code, p_room_key: prior.key, p_player_id: prior.playerId }).then(state => setRemoteRoom(prior, state)).catch(() => { $('#roomInvite').value = location.href; }); }
     else { $$('.mode-tab').forEach(b=>b.classList.toggle('active',b.dataset.mode==='online')); $$('.mode-panel').forEach(p=>p.classList.toggle('active',p.id==='onlinePanel')); mode='online'; $('#roomInvite').value=location.href; resumeRoomAfterIdentity=!userName; openSetup(); }
   }
   initInvite();
