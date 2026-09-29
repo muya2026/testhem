@@ -40,13 +40,28 @@ This one script creates the room table (`testhem_rooms`), the opt-in public wall
 
 ## 3. Copy the project URL and publishable key
 
-1. In Supabase, click **Connect** near the top of the project dashboard.
-2. Copy the **Project URL**. It looks like `https://abcdefghijklmnop.supabase.co`. Do not copy the database connection string.
-3. In the same **Connect** dialog, copy the **publishable key** beginning `sb_publishable_`.
-4. If you do not see the key in Connect, open **Project Settings** (gear icon) → **API Keys**, then copy the **Publishable key** (often named `default`).
-5. Do not copy a key beginning `sb_secret_`, and do not copy a `service_role` key. Those are server-only secrets and must never appear in GitHub Pages or browser code.
+**Skip the Connect dialog for these values.** In the current Supabase dashboard, the URL and API key are in separate places:
 
-Supabase’s current guidance says publishable keys are intended for browser/mobile apps; secret keys bypass protections and must remain on a server. See [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys).
+### Project URL
+
+1. In your project’s left sidebar, open **Integrations**.
+2. Click **Data API**.
+3. Copy the **Project URL / API URL** shown on that page. It looks like `https://abcdefghijklmnop.supabase.co`.
+4. Copy only the base URL. Do not add `/rest/v1`, and do not use the database connection string.
+
+If the Data API page is not available in your layout, read the **Project ref** from the dashboard address. It is the part after `/dashboard/project/` and before the next `/`. For the standard Supabase domain, the URL is `https://PROJECT_REF.supabase.co`.
+
+### Publishable key
+
+1. In the left sidebar, click **Project Settings** (gear icon).
+2. Click **API Keys**.
+3. Find **Publishable and secret API keys** / **Publishable keys**.
+4. Click **Copy** beside the `default` publishable key beginning `sb_publishable_`.
+5. If there is no publishable key listed, use the **Create new API key** control on that page and create a **Publishable** key. Copy that key.
+
+Do not copy a key beginning `sb_secret_`, and do not copy a `service_role` key. Those are server-only secrets and must never appear in GitHub Pages or browser code.
+
+Supabase documents the Project URL under **Integrations → Data API** and keys under **Settings → API Keys**: [Data API](https://supabase.com/docs/guides/api) · [API keys](https://supabase.com/docs/guides/getting-started/api-keys).
 
 ## 4. Put the safe values into `config.js`
 
