@@ -269,7 +269,8 @@ main#world { position: fixed; inset: 0; z-index: 5; }
   background: rgba(6, 11, 20, .72); backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
   border: 1px solid var(--line-2);
   border-color: color-mix(in srgb, var(--portal, var(--cyan)) 38%, transparent);
-  transition: opacity .25s, background-color .25s, border-color .25s, box-shadow .25s;
+  transition: opacity .25s, transform .25s var(--ease), background-color .25s, border-color .25s, box-shadow .25s;
+  will-change: transform, opacity;
 }
 .world-label .label-number {
   width: 25px; height: 25px; flex: none; display: grid; place-items: center;
@@ -788,7 +789,7 @@ button.answer-card:hover { border-color: var(--line-2); }
   position: absolute; left: 50%; top: 54%; transform: translate(-50%, -50%);
   width: min(760px, 92vw); pointer-events: auto; z-index: 6;
 }
-.webgl-fallback .world-label { position: static; transform: none; opacity: 1 !important; pointer-events: auto !important; justify-content: center; }
+.webgl-fallback .world-label { position: static; transform: none !important; opacity: 1 !important; pointer-events: auto !important; justify-content: center; }
 .webgl-fallback .welcome-hud { background: rgba(7, 12, 22, .94); }
 @media (max-width: 780px) {
   .webgl-fallback .world-labels { grid-template-columns: repeat(2, 1fr); top: 60%; max-height: 34vh; overflow: auto; }

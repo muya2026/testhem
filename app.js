@@ -528,16 +528,32 @@
   const skyFS=`precision highp float;
 varying vec2 vUv;
 uniform vec2 uResolution;
-uniform float uTime,uHour,uMoonPhase,uDoy;
+uniform float uTime,uHour,uMoonPhase,uDoy,uYaw,uPitch;
 
 float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
 float noise(vec2 p){vec2 i=floor(p),f=fract(p);vec2 u=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1.,0.)),u.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),u.x),u.y);}
 float fbm3(vec2 p){float v=0.,a=.5;for(int i=0;i<3;i++){v+=a*noise(p);p=p*1.97+vec2(5.3,1.7);a*=.5;}return v;}
 float fbm5(vec2 p){float v=0.,a=.5;for(int i=0;i<5;i++){v+=a*noise(p);p=p*2.02+vec2(9.7,3.1);a*=.5;}return v;}
+// value noise wrapped on x so the horizon ridge loops seamlessly with azimuth
+float hashW(vec2 p,float per){p.x=mod(p.x,per);return hash(p);}
+float noiseW(vec2 p,float per){vec2 i=floor(p),f=fract(p);vec2 u=f*f*(3.-2.*f);return mix(mix(hashW(i,per),hashW(i+vec2(1.,0.),per),u.x),mix(hashW(i+vec2(0.,1.),per),hashW(i+vec2(1.,1.),per),u.x),u.y);}
+float ridgeH(float u){float v=noiseW(vec2(u*8.,3.7),8.)*.55+noiseW(vec2(u*24.,8.2),24.)*.30+noiseW(vec2(u*64.,1.9),64.)*.15;return 0.004+v*v*0.075;}
 
 void main(){
   vec2 uv=vUv;
   float aspect=uResolution.x/uResolution.y;
+
+  // ---- camera ray through this pixel: 48° vertical FOV rotated by live yaw/pitch,
+  //      so the whole sky parallaxes with the observatory camera (true 3D dome)
+  vec2 ndc=uv*2.-1.;
+  float th=0.4452;
+  vec3 rdv=normalize(vec3(ndc.x*th*aspect,ndc.y*th,-1.));
+  float sy=sin(uYaw),cy=cos(uYaw),sp=sin(uPitch),cp=cos(uPitch);
+  vec3 fwd=vec3(sy*cp,sp,-cy*cp);
+  vec3 rgt=vec3(cy,0.,sy);
+  vec3 upv=vec3(-sp*sy,cp,sp*cy);
+  vec3 rd=normalize(rgt*rdv.x+upv*rdv.y+fwd);
+  float azr=atan(rd.x,-rd.z+1e-5);
 
   // ---- sun path: civil hour + seasonal declination (fixed 20N, no geolocation)
   float decl=-0.4091*cos((uDoy+10.)/365.25*6.28318);
@@ -545,30 +561,31 @@ void main(){
   float ha=(uHour-12.)/12.*3.14159;
   float sinEl=sin(lat)*sin(decl)+cos(lat)*cos(decl)*cos(ha);
   float sunEl=asin(clamp(sinEl,-1.,1.))/1.5708;            // -1..1 elevation
+  float elS=asin(clamp(sinEl,-1.,1.));                     // radians, for direction
   float dayW=smoothstep(-0.06,0.18,sunEl);                 // daylight weight
   float golden=exp(-pow((sunEl-0.03)*6.5,2.));             // golden-hour band
-  float nightW=1.-smoothstep(-0.20,0.02,sunEl);               // deep-night weight
-  float sunX=0.5+0.46*sin(ha);
-  float sunY=0.235+max(sunEl,-0.16)*0.66;
+  float nightW=1.-smoothstep(-0.20,0.02,sunEl);            // deep-night weight
+  float sunAz=-ha;                                         // rises screen-right, sets screen-left
+  vec3 sunDir=vec3(sin(sunAz)*cos(elS),clamp(sinEl,-1.,1.),-cos(sunAz)*cos(elS));
 
-  // ---- base atmosphere gradient
-  float h=clamp((uv.y-0.20)/0.78,0.,1.);
+  // ---- base atmosphere gradient (elevation-driven)
+  float h=clamp(rd.y+0.04,0.,1.);
   vec3 nightCol=mix(vec3(0.016,0.034,0.070),vec3(0.004,0.010,0.030),pow(h,0.72));
   vec3 dayCol=mix(vec3(0.630,0.790,0.905),vec3(0.180,0.430,0.740),pow(h,0.80));
   vec3 col=mix(nightCol,dayCol,dayW);
 
   // warm forward scatter around the sun azimuth (twilight + low sun)
-  float az=exp(-pow((uv.x-sunX)*2.4,2.));
+  float dAz=atan(sin(azr-sunAz),cos(azr-sunAz));
+  float az=exp(-pow(dAz/2.63,2.));
   float lowBand=exp(-pow(h*1.9,2.));
   vec3 scatterC=mix(vec3(1.00,0.42,0.16),vec3(1.00,0.66,0.36),h);
-  float fwd=clamp(golden*az*lowBand*1.25+dayW*az*exp(-pow((sunEl-0.35)*3.,2.))*0.14,0.,1.);
-  col=mix(col,scatterC,fwd);
+  float fwdG=clamp(golden*az*lowBand*1.25+dayW*az*exp(-pow((sunEl-0.35)*3.,2.))*0.14,0.,1.);
+  col=mix(col,scatterC,fwdG);
   // Belt of Venus: violet band above the glow at twilight
   col+=vec3(0.32,0.13,0.30)*golden*az*exp(-pow((h-0.30)*4.5,2.))*0.55;
 
-  // ---- sun disc + bloom
-  vec2 sp=vec2(sunX,sunY);
-  float sd=length((uv-sp)*vec2(aspect,1.));
+  // ---- sun disc + bloom (angular chord scaled so the tuned sizes still hold)
+  float sd=length(rd-sunDir)*0.45;
   float svis=max(dayW,golden*0.85);
   col+=scatterC*exp(-sd*2.6)*0.22*(golden+dayW*0.5);
   col+=mix(vec3(1.,0.55,0.25),vec3(1.,0.92,0.72),dayW)*(exp(-sd*14.)*0.9+exp(-sd*4.5)*0.25)*svis;
@@ -576,26 +593,33 @@ void main(){
   col=mix(col,vec3(1.,0.97,0.90),disc*smoothstep(0.02,0.10,sunEl));
 
   // ---- stars: two magnitude tiers, color variation, twinkle, milky way
-  float starGate=nightW*smoothstep(0.16,0.30,uv.y);
-  vec2 g1=uv*vec2(300.,170.);vec2 id1=floor(g1),f1=fract(g1)-.5;
+  //      azimuth wraps through fract(), so the star field is seamless when panning
+  vec2 suv=vec2(fract(azr/6.28319+0.5),asin(clamp(rd.y,-1.,1.))/3.14159+0.5);
+  float starGate=nightW*smoothstep(-0.10,0.06,rd.y);
+  vec2 g1=suv*vec2(300.,170.);vec2 id1=floor(g1),f1=fract(g1)-.5;
   float r1=hash(id1);
-  float s1=1.-smoothstep(0.0,0.05,length(f1))*step(0.972,r1)*0.55;
-  vec2 g2=uv*vec2(150.,85.);vec2 id2=floor(g2),f2=fract(g2)-.5;
+  float s1=(1.-smoothstep(0.0,0.05,length(f1)))*step(0.972,r1)*0.55;
+  vec2 g2=suv*vec2(150.,85.);vec2 id2=floor(g2),f2=fract(g2)-.5;
   float r2=hash(id2+71.3);
-  float s2=1.-smoothstep(0.0,0.09,length(f2))*step(0.965,r2)*1.35;
+  float s2=(1.-smoothstep(0.0,0.09,length(f2)))*step(0.965,r2)*1.35;
   float tw=0.6+0.4*sin(uTime*(0.8+r1*3.)+r1*43.)*(0.6+0.4*sin(uTime*0.7+r2*29.));
   vec3 sC=mix(vec3(0.70,0.80,1.0),vec3(1.0,0.86,0.70),hash(id2+3.1));
   col+=sC*(s1+s2)*(0.55+0.45*tw)*starGate;
-  float band=exp(-pow((uv.x*0.55+uv.y*0.85-0.80),2.)*34.);
-  col+=vec3(0.26,0.34,0.56)*band*(0.35+0.65*fbm3(uv*vec2(4.,9.)))*starGate*0.55;
+  // milky way: a tilted great-circle band on the direction sphere (no seams)
+  float band=exp(-pow(dot(rd,vec3(0.16,0.62,-0.20))-0.43,2.)*26.);
+  col+=vec3(0.26,0.34,0.56)*band*(0.35+0.65*fbm3(rd.xy*vec2(5.,9.)))*starGate*0.55;
 
-  // ---- moon with phase-lit maria/craters
-  vec2 mp=vec2(0.735,0.66);
-  vec2 mq=(uv-mp)*vec2(aspect,1.);
-  float md=length(mq);
+  // ---- moon opposite the sun, phase-lit maria/craters
+  float azM=sunAz+3.14159;
+  float elM=0.55-elS*0.55;
+  vec3 moonDir=vec3(sin(azM)*cos(elM),sin(elM),-cos(azM)*cos(elM));
+  vec3 dM=rd-moonDir;
+  float md=length(dM)*0.45;
   float mR=0.028;
   float inM=1.-smoothstep(mR*0.955,mR,md);
-  vec2 mm=mq/mR;
+  vec3 t1=normalize(cross(moonDir,vec3(0.,1.,0.)));
+  vec3 t2=cross(t1,moonDir);
+  vec2 mm=vec2(dot(dM,t1),dot(dM,t2))*0.45/mR;
   float mz=sqrt(max(0.,1.-dot(mm,mm)));
   float ph=uMoonPhase*6.28318;
   vec3 ld=normalize(vec3(cos(ph),0.35*sin(ph)+0.15,0.72));
@@ -606,12 +630,13 @@ void main(){
   col=mix(col,moonC,inM*mgate);
   col+=vec3(0.55,0.66,0.92)*exp(-md*6.5)*0.10*mgate;
 
-  // ---- clouds: domain-warped fbm, drifting, lit by sun and moon
-  vec2 cuv=vec2(uv.x*2.4+uTime*0.0075,uv.y*5.6-uTime*0.0018);
+  // ---- clouds: planar-projected domain-warped fbm (no azimuth seam), drifting,
+  //      lit by sun and moon; perspective compresses them toward the horizon
+  vec2 cuv=rd.xz/(abs(rd.y)+0.16)+vec2(uTime*0.0075,uTime*0.0018);
   float w1=fbm3(cuv*1.35);
   float w2=fbm3(cuv*1.35+5.2);
   float cl=fbm5(cuv+vec2(w1,w2)*0.65);
-  float cover=smoothstep(0.46,0.72,cl)*smoothstep(0.03,0.20,uv.y);
+  float cover=smoothstep(0.46,0.72,cl)*smoothstep(-0.26,-0.04,rd.y);
   float lit=smoothstep(0.46,0.95,cl);
   vec3 cd=mix(vec3(0.62,0.68,0.78),vec3(1.02,1.00,0.97),lit);
   vec3 cn=mix(vec3(0.045,0.065,0.105),vec3(0.16,0.20,0.30),lit*0.8+0.15*exp(-md*3.)*mgate);
@@ -620,30 +645,42 @@ void main(){
   cc+=vec3(0.9,0.95,1.)*exp(-md*5.)*0.10*mgate*lit;          // moonlit silver lining
   col=mix(col,cc,cover*0.88);
   // wispy cirrus aloft
-  float cir=smoothstep(0.60,0.88,fbm3(cuv*3.2-vec2(w2,w1)*0.4))*0.16*smoothstep(0.35,0.75,uv.y)*(0.4+0.6*dayW);
+  float cir=smoothstep(0.60,0.88,fbm3(cuv*3.2-vec2(w2,w1)*0.4))*0.16*smoothstep(0.15,0.67,rd.y)*(0.4+0.6*dayW);
   col=mix(col,mix(cn*1.4,cd,dayW),cir);
 
-  // ---- horizon haze + sun-side ground glow
-  col+=mix(vec3(0.03,0.05,0.09),vec3(0.50,0.60,0.72),dayW)*exp(-pow((uv.y-0.232)*8.5,2.))*0.22;
-  col+=scatterC*exp(-pow((uv.y-0.245)*11.,2.))*golden*az*0.38;
-
-  // ---- occasional meteor (night only, every ~27s)
-  float cyc=uTime/27.;
+  // ---- occasional meteor (night only, brief streak across the dome)
+  float cyc=uTime/21.;
   float n=floor(cyc),pp=fract(cyc);
-  vec2 hA=vec2(hash(vec2(n,1.7)),hash(vec2(n,9.2)));
-  vec2 dir=normalize(vec2(0.75+0.45*hash(vec2(n,3.3)),-0.30-0.28*hash(vec2(n,5.1))));
-  vec2 org=vec2(0.08+0.8*hA.x,0.55+0.38*hA.y);
+  float hA=hash(vec2(n,1.7));
+  float mAz=(hash(vec2(n,4.4))-.5)*6.28319;
+  float mEl=0.30+0.50*hA;
+  vec3 org=vec3(sin(mAz)*cos(mEl),sin(mEl),-cos(mAz)*cos(mEl));
+  vec3 tangent=normalize(cross(org,vec3(0.,1.,0.))+vec3((hash(vec2(n,3.3))-.5)*0.9,0.,(hash(vec2(n,5.1))-.5)*0.9));
   float head=pp*30.;
   if(head<1.&&nightW>0.05){
-    vec2 hd=org+dir*head*0.66;
-    vec2 dv=uv-hd; dv.x*=aspect;
-    float paral=dot(dv,-dir);
-    float perp=dot(dv,vec2(-dir.y,dir.x));
-    float streak=exp(-perp*perp*3200.)*exp(-max(paral,0.)*22.)*step(0.,paral)*exp(-head*2.4);
+    vec3 hd=normalize(org+tangent*head*1.1);
+    vec3 dv=rd-hd;
+    float paral=dot(dv,tangent);
+    float perp=dot(dv,cross(tangent,hd));
+    float streak=exp(-perp*perp*2000.)*exp(-max(paral,0.)*12.)*step(0.,paral)*exp(-head*2.4);
     col+=vec3(0.85,0.92,1.)*streak*nightW*1.4;
   }
 
-  // vignette
+  // ---- distant horizon ridge: a wrapped-noise silhouette that parallaxes with the
+  //      camera, sitting in front of the sky and behind the observatory haze
+  float azu=fract(azr/6.28319+0.5);
+  float rh=ridgeH(azu);
+  float ridgeBand=smoothstep(-0.16,-0.05,rd.y);
+  float sil=(1.-smoothstep(rh-0.0035,rh+0.002,rd.y))*ridgeBand;
+  vec3 ridgeC=mix(vec3(0.010,0.017,0.038),vec3(0.085,0.13,0.20),dayW);
+  ridgeC=mix(ridgeC,scatterC*0.5,golden*az*0.45);            // twilight kiss on the ridgeline
+  col=mix(col,ridgeC,sil);
+
+  // ---- horizon haze + sun-side ground glow (atmosphere in front of the ridge)
+  col+=mix(vec3(0.03,0.05,0.09),vec3(0.50,0.60,0.72),dayW)*exp(-pow(rd.y*6.5,2.))*0.22;
+  col+=scatterC*exp(-pow((rd.y+0.02)*8.5,2.))*golden*az*0.38;
+
+  // vignette (screen space)
   float vig=1.-smoothstep(0.45,1.25,length((uv-.5)*vec2(aspect*.8,1.)));
   col*=0.80+0.20*vig;
   gl_FragColor=vec4(col,1.);
@@ -693,8 +730,8 @@ void main(){
   c=mix(c,uFog,fogF*0.7);
   gl_FragColor=vec4(c,alpha);
 }`;
-  const lineVS=`attribute vec3 aPosition;uniform mat4 uMVP;void main(){gl_Position=uMVP*vec4(aPosition,1.);}`;
-  const lineFS=`precision mediump float;uniform vec4 uColor;void main(){gl_FragColor=uColor;}`;
+  const lineVS=`attribute vec3 aPosition;uniform mat4 uMVP;uniform float uPhase,uGlow;uniform vec3 uCam;varying float vA;void main(){float a=atan(aPosition.z,aPosition.x);float lead=0.5+0.5*cos(a-uPhase);float ring=0.45+0.55*pow(lead,10.);float fade=exp(-distance(aPosition,uCam)*0.055);vA=uGlow<0.5?1.:(uGlow<1.5?ring:fade);gl_Position=uMVP*vec4(aPosition,1.);}`;
+  const lineFS=`precision mediump float;uniform vec4 uColor;varying float vA;void main(){gl_FragColor=vec4(uColor.rgb,uColor.a*vA);}`;
   function shader(gl,type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){console.warn(gl.getShaderInfoLog(s));return null;}return s;}
   function program(gl,vs,fs){const v=shader(gl,gl.VERTEX_SHADER,vs),f=shader(gl,gl.FRAGMENT_SHADER,fs);if(!v||!f)return null;const p=gl.createProgram();gl.attachShader(p,v);gl.attachShader(p,f);gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS)){console.warn(gl.getProgramInfoLog(p));return null;}return p;}
   const mat={identity:()=>new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]),mul:(a,b)=>{const o=new Float32Array(16);for(let c=0;c<4;c++)for(let r=0;r<4;r++)o[c*4+r]=a[r]*b[c*4]+a[4+r]*b[c*4+1]+a[8+r]*b[c*4+2]+a[12+r]*b[c*4+3];return o;},trans:(x,y,z)=>{const o=mat.identity();o[12]=x;o[13]=y;o[14]=z;return o;},scale:(x,y,z)=>new Float32Array([x,0,0,0,0,y,0,0,0,0,z,0,0,0,0,1]),rx:a=>new Float32Array([1,0,0,0,0,Math.cos(a),Math.sin(a),0,0,-Math.sin(a),Math.cos(a),0,0,0,0,1]),ry:a=>new Float32Array([Math.cos(a),0,-Math.sin(a),0,0,1,0,0,Math.sin(a),0,Math.cos(a),0,0,0,0,1]),rz:a=>new Float32Array([Math.cos(a),Math.sin(a),0,0,-Math.sin(a),Math.cos(a),0,0,0,0,1,0,0,0,0,1]),persp:(fov,aspect,n,f)=>{const t=1/Math.tan(fov/2),nf=1/(n-f);return new Float32Array([t/aspect,0,0,0,0,t,0,0,0,0,(f+n)*nf,-1,0,0,2*f*n*nf,0]);},look:(eye,center)=>{const norm=v=>{const l=Math.hypot(...v)||1;return v.map(x=>x/l)},cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];const z=norm([eye[0]-center[0],eye[1]-center[1],eye[2]-center[2]]),x=norm(cross([0,1,0],z)),y=cross(z,x);return new Float32Array([x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-dot(x,eye),-dot(y,eye),-dot(z,eye),1]);}};
@@ -706,15 +743,29 @@ void main(){
     let gl;try{gl=canvas.getContext('webgl',{alpha:false,antialias:true,powerPreference:'high-performance'});}catch(e){}if(!gl){document.body.classList.add('webgl-fallback');return;}
     canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();document.body.classList.add('webgl-fallback');});
     const skyP=program(gl,skyVS,skyFS),objP=program(gl,objVS,objFS),lineP=program(gl,lineVS,lineFS);if(!skyP||!objP||!lineP){document.body.classList.add('webgl-fallback');return;}
-    const quad=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,quad);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);const sphere=sphereMesh(gl),torus=torusMesh(gl);const gridData=[];for(let x=-16;x<=16;x+=1)gridData.push(x,-.7,-5,x,-.7,-32);for(let z=-5;z>=-32;z-=1)gridData.push(-16,-.7,z,16,-.7,z);const gridBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,gridBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(gridData),gl.STATIC_DRAW);const orbitBuffers=orbitRadii.map((r,i)=>{const a=[];for(let j=0;j<=180;j++){const q=j/180*Math.PI*2;a.push(Math.cos(q)*r,orbitCenter[1]+Math.sin(q+orbitPhases[i]*.37)*r*.055,orbitCenter[2]+Math.sin(q)*r*orbitTilts[i]);}const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(a),gl.STATIC_DRAW);return{buffer:b,count:a.length/3};});
+    const quad=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,quad);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);const sphere=sphereMesh(gl),torus=torusMesh(gl);const gridData=[];for(let x=-16;x<=16;x+=1)gridData.push(x,-.7,-5,x,-.7,-32);for(let z=-5;z>=-32;z-=1)gridData.push(-16,-.7,z,16,-.7,z);const gridBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,gridBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(gridData),gl.STATIC_DRAW);
+    // Seven orbital planes around the core: nested radii, fanned inclination, staggered
+    // nodes — a layered gyroscope. Declared BEFORE the buffers that use it (the previous
+    // order threw a ReferenceError and silently killed the whole scene).
+    const DEG=Math.PI/180,orbitCenter=[0,2.75,-17];
+    const orbitRadii=[5.6,6.45,7.3,8.15,9.0,9.85,10.7];
+    const orbitPhases=[2.65,2.35,1.98,1.57,1.15,.8,.5];
+    const orbitRates=[.052,.058,.067,.08,.067,.058,.052];
+    const orbitInc=[-16.5,-11,-5.5,0,5.5,11,16.5];
+    const orbitNode=[8,49,90,131,172,213,254];
+    const orbitCfg=orbitRadii.map((r,i)=>({r,ph:orbitPhases[i],rate:orbitRates[i],inc:orbitInc[i]*DEG,node:orbitNode[i]*DEG}));
+    orbitCfg.forEach(o=>{o.model=mat.mul(mat.mul(mat.trans(...orbitCenter),mat.ry(o.node)),mat.rx(o.inc));});
+    // Shared point math: rings and portals use the exact same transform, so every
+    // portal rides precisely on its own orbit line.
+    function orbitPoint(i,a){const o=orbitCfg[i],x=Math.cos(a)*o.r,z=Math.sin(a)*o.r,m=o.model;return[m[0]*x+m[8]*z+m[12],m[1]*x+m[9]*z+m[13],m[2]*x+m[10]*z+m[14]];}
+    const orbitBuffers=orbitCfg.map(o=>{const a=[];for(let j=0;j<=240;j++){const q=j/240*Math.PI*2;a.push(Math.cos(q)*o.r,0,Math.sin(q)*o.r);}const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(a),gl.STATIC_DRAW);return{buffer:b,count:a.length/3};});
     const loc=(p,n)=>gl.getAttribLocation(p,n),un=(p,n)=>gl.getUniformLocation(p,n);
-    const skyL={pos:loc(skyP,'aPosition'),res:un(skyP,'uResolution'),time:un(skyP,'uTime'),hour:un(skyP,'uHour'),moon:un(skyP,'uMoonPhase'),doy:un(skyP,'uDoy')};
+    const skyL={pos:loc(skyP,'aPosition'),res:un(skyP,'uResolution'),time:un(skyP,'uTime'),hour:un(skyP,'uHour'),moon:un(skyP,'uMoonPhase'),doy:un(skyP,'uDoy'),yaw:un(skyP,'uYaw'),pitch:un(skyP,'uPitch')};
     const objL={pos:loc(objP,'aPosition'),normal:loc(objP,'aNormal'),mvp:un(objP,'uMVP'),model:un(objP,'uModel'),kind:un(objP,'uKind'),time:un(objP,'uTime'),tint:un(objP,'uTint'),light:un(objP,'uLight'),fog:un(objP,'uFog'),cam:un(objP,'uCam')};
-    const lineL={pos:loc(lineP,'aPosition'),mvp:un(lineP,'uMVP'),color:un(lineP,'uColor')};
-    let cssW=0,cssH=0,dpr=1;const eye=[0,1.55,1.0];let yaw=0,pitch=.015,yawTarget=0,pitchTarget=.015;let keys={},drag=null,mouse={x:-999,y:-999},selectedScreen=[];let lastTime=0,sceneTime=0,hover=-1;
-    const orbitRadii=[7.8,7.2,6.6,6.0,6.6,7.2,7.8],orbitPhases=[2.65,2.35,1.98,1.57,1.15,.8,.5],orbitRates=[.052,.058,.067,.08,.067,.058,.052],orbitTilts=[.23,.27,.31,.35,.39,.43,.47],orbitCenter=[0,2.05,-17];
-    function portalAt(i,t){const a=orbitPhases[i]+t*orbitRates[i],r=orbitRadii[i],tilt=orbitTilts[i];return[Math.cos(a)*r,orbitCenter[1]+Math.sin(a+orbitPhases[i]*.37)*r*.055,orbitCenter[2]+Math.sin(a)*r*tilt];}
-    function getView(){const cp=Math.cos(pitch),dir=[Math.sin(yaw)*cp,Math.sin(pitch),-Math.cos(yaw)*cp];const center=[eye[0]+dir[0],eye[1]+dir[1],eye[2]+dir[2]];return{dir,view:mat.look(eye,center)};}
+    const lineL={pos:loc(lineP,'aPosition'),mvp:un(lineP,'uMVP'),color:un(lineP,'uColor'),phase:un(lineP,'uPhase'),glow:un(lineP,'uGlow'),cam:un(lineP,'uCam')};
+    let cssW=0,cssH=0,dpr=1;const eye=[0,1.55,1.0];let yaw=0,pitch=.015,yawTarget=0,pitchTarget=.015;let keys={},drag=null,mouse={x:-999,y:-999},selectedScreen=[];let lastTime=0,sceneTime=0,hover=-1;let swayYaw=0,swayPitch=0;
+    function portalAt(i,t){const o=orbitCfg[i];return orbitPoint(i,o.ph+t*o.rate);}
+    function getView(){const yy=yaw+swayYaw,pp2=pitch+swayPitch,cp=Math.cos(pp2),dir=[Math.sin(yy)*cp,Math.sin(pp2),-Math.cos(yy)*cp];const center=[eye[0]+dir[0],eye[1]+dir[1],eye[2]+dir[2]];return{dir,view:mat.look(eye,center)};}
     function portalTarget(i){const p=portalAt(i,sceneTime);const dx=p[0]-eye[0],dy=p[1]-eye[1],dz=p[2]-eye[2];yawTarget=Math.atan2(dx,-dz);pitchTarget=Math.atan2(dy,Math.hypot(dx,dz));}
     focusPortal=i=>portalTarget(i);resetCamera=()=>{eye[0]=0;eye[1]=1.55;eye[2]=1;yawTarget=0;pitchTarget=.015;};
     // Device-local civil time drives the whole sky: sun path, twilight, moon phase, cloud light.
@@ -727,11 +778,12 @@ void main(){
     const portalPositionsFor=()=>gameCatalog.map((_,i)=>portalAt(i,sceneTime));
     function drawMesh(meshObj,model,vp,kind,tint,time,alpha=false){gl.useProgram(objP);gl.bindBuffer(gl.ARRAY_BUFFER,meshObj.pb);gl.enableVertexAttribArray(objL.pos);gl.vertexAttribPointer(objL.pos,3,gl.FLOAT,false,0,0);gl.bindBuffer(gl.ARRAY_BUFFER,meshObj.nb);gl.enableVertexAttribArray(objL.normal);gl.vertexAttribPointer(objL.normal,3,gl.FLOAT,false,0,0);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,meshObj.ib);gl.uniformMatrix4fv(objL.mvp,false,mat.mul(vp,model));gl.uniformMatrix4fv(objL.model,false,model);gl.uniform1f(objL.kind,kind);gl.uniform1f(objL.time,time);gl.uniform3fv(objL.tint,tint);gl.uniform3f(objL.light,0,6,4);gl.uniform3fv(objL.fog,fogNow);gl.uniform3f(objL.cam,eye[0],eye[1],eye[2]);if(alpha){gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);}gl.drawElements(gl.TRIANGLES,meshObj.count,gl.UNSIGNED_SHORT,0);if(alpha){gl.depthMask(true);gl.disable(gl.BLEND);}}
     function project(p,vp,w,h){const q=[p[0],p[1],p[2],1],c=[0,0,0,0];for(let i=0;i<4;i++)c[i]=vp[i]*q[0]+vp[4+i]*q[1]+vp[8+i]*q[2]+vp[12+i];if(c[3]<=.05)return null;const nx=c[0]/c[3],ny=c[1]/c[3],nz=c[2]/c[3];return{x:(nx*.5+.5)*w,y:(1-(ny*.5+.5))*h,z:nz,visible:nz>-1.1&&nz<1.1};}
-    function drawGrid(vp){gl.useProgram(lineP);gl.bindBuffer(gl.ARRAY_BUFFER,gridBuffer);gl.enableVertexAttribArray(lineL.pos);gl.vertexAttribPointer(lineL.pos,3,gl.FLOAT,false,0,0);gl.uniformMatrix4fv(lineL.mvp,false,vp);gl.uniform4f(lineL.color,.38,.59,.73,.12);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.drawArrays(gl.LINES,0,gridData.length/3);gl.disable(gl.BLEND);}
-    function drawOrbits(vp){gl.useProgram(lineP);gl.enableVertexAttribArray(lineL.pos);gl.uniformMatrix4fv(lineL.mvp,false,vp);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);orbitBuffers.forEach((o,i)=>{const c=rgb(gameCatalog[i].color);gl.uniform4f(lineL.color,c[0],c[1],c[2],.15);gl.bindBuffer(gl.ARRAY_BUFFER,o.buffer);gl.vertexAttribPointer(lineL.pos,3,gl.FLOAT,false,0,0);gl.drawArrays(gl.LINE_STRIP,0,o.count);});gl.depthMask(true);gl.disable(gl.BLEND);}
+    function drawGrid(vp){gl.useProgram(lineP);gl.bindBuffer(gl.ARRAY_BUFFER,gridBuffer);gl.enableVertexAttribArray(lineL.pos);gl.vertexAttribPointer(lineL.pos,3,gl.FLOAT,false,0,0);gl.uniformMatrix4fv(lineL.mvp,false,vp);gl.uniform1f(lineL.glow,0);gl.uniform1f(lineL.phase,0);gl.uniform3f(lineL.cam,eye[0],eye[1],eye[2]);gl.uniform4f(lineL.color,.38,.59,.73,.17);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.drawArrays(gl.LINES,0,gridData.length/3);gl.disable(gl.BLEND);}
+    function drawOrbits(vp,t){gl.useProgram(lineP);gl.enableVertexAttribArray(lineL.pos);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);const focusVisible=$('#portalFocus').classList.contains('visible');orbitBuffers.forEach((o,i)=>{const c=rgb(gameCatalog[i].color),hot=i===hover||(i===sceneSelectIndex&&focusVisible);gl.uniformMatrix4fv(lineL.mvp,false,mat.mul(vp,orbitCfg[i].model));gl.uniform1f(lineL.phase,orbitCfg[i].ph+t*orbitCfg[i].rate);gl.uniform1f(lineL.glow,1);gl.uniform4f(lineL.color,c[0],c[1],c[2],hot?.62:.30);gl.bindBuffer(gl.ARRAY_BUFFER,o.buffer);gl.vertexAttribPointer(lineL.pos,3,gl.FLOAT,false,0,0);gl.drawArrays(gl.LINE_STRIP,0,o.count);});gl.depthMask(true);gl.disable(gl.BLEND);}
+    function drawBeads(vp,t){gameCatalog.forEach((g,i)=>{const o=orbitCfg[i],color=rgb(g.color).map(v=>Math.min(1,v*.65+.35));for(let k=0;k<2;k++){const a=o.ph+t*o.rate*1.35+k*Math.PI+i*.9,p=orbitPoint(i,a),m=mat.mul(mat.trans(p[0],p[1],p[2]),mat.scale(.062,.062,.062));drawMesh(sphere,m,vp,2,color,t);}});}
     function drawCore(vp,t){const base=mat.trans(...orbitCenter);const star=mat.mul(base,mat.scale(.4,.4,.4));drawMesh(sphere,star,vp,2,[1,.63,.27],t);const halo=mat.mul(base,mat.mul(mat.rx(.22),mat.scale(.72,.72,.72)));drawMesh(torus,halo,vp,11,[1,.62,.25],t);}
     const worldCoordsEl=$('#worldCoords');let lastCoords='';
-    function updateLabels(vp,w,h){selectedScreen=portalPositionsFor().map((p,i)=>project(p,vp,w,h));let nearest=-1,dist=76;selectedScreen.forEach((p,i)=>{const el=portalElements[i];if(!p||!p.visible){el.style.opacity='0';el.style.pointerEvents='none';return;}el.style.left=`${p.x}px`;el.style.top=`${p.y}px`;el.style.opacity=p.z>.94?'.35':'1';el.style.pointerEvents=p.z>.98?'none':'auto';const d=Math.hypot(mouse.x-p.x,mouse.y-p.y);if(d<dist){dist=d;nearest=i;}});hover=nearest;portalElements.forEach((e,i)=>e.classList.toggle('is-hovered',i===hover));const coords=`X ${eye[0].toFixed(1)} · Z ${eye[2].toFixed(1)}`;if(coords!==lastCoords){worldCoordsEl.textContent=coords;lastCoords=coords;}}
+    function updateLabels(vp,w,h){selectedScreen=portalPositionsFor().map((p,i)=>project(p,vp,w,h));let nearest=-1,dist=76;selectedScreen.forEach((p,i)=>{const el=portalElements[i];if(!p||!p.visible){el.style.opacity='0';el.style.pointerEvents='none';return;}const far=Math.min(1,Math.max(0,(p.z-0.5)/0.45));el.style.left=`${p.x}px`;el.style.top=`${p.y}px`;el.style.transform=`translate(-50%,-50%) scale(${(1.22-0.42*far).toFixed(3)})`;el.style.zIndex=String(Math.max(1,Math.round((1-p.z)*80)));el.style.opacity=(1-far*0.72).toFixed(3);el.style.pointerEvents=p.z>.98?'none':'auto';const d=Math.hypot(mouse.x-p.x,mouse.y-p.y);if(d<dist){dist=d;nearest=i;}});hover=nearest;portalElements.forEach((e,i)=>e.classList.toggle('is-hovered',i===hover));const coords=`X ${eye[0].toFixed(1)} · Z ${eye[2].toFixed(1)}`;if(coords!==lastCoords){worldCoordsEl.textContent=coords;lastCoords=coords;}}
     function drawPortals(vp,t){const focusVisible=$('#portalFocus').classList.contains('visible');gameCatalog.forEach((game,i)=>{const p=portalAt(i,t),color=rgb(game.color),hovered=i===hover,selected=i===sceneSelectIndex&&focusVisible;const s=hovered||selected?1.08:1;const a=orbitPhases[i]+t*orbitRates[i];const base=mat.mul(mat.trans(p[0],p[1],p[2]),mat.mul(mat.ry(Math.sin(a)*.055),mat.rz(Math.sin(a*.5)*.018)));const ringModel=mat.mul(base,mat.scale(.92*s,1.12*s,.92*s));drawMesh(torus,ringModel,vp,11,color,t);const innerModel=mat.mul(base,mat.scale(.70*s,.88*s,.095));drawMesh(sphere,innerModel,vp,12,color,t,true);const innerRing=mat.mul(base,mat.mul(mat.rx(.02),mat.scale(.77*s,.94*s,.78*s)));drawMesh(torus,innerRing,vp,11,color.map(v=>Math.min(1,v*1.25+.1)),t);const sa=t*(.31+i*.025)+orbitPhases[i],sat=mat.mul(mat.trans(p[0]+Math.cos(sa)*1.3,p[1]+Math.sin(sa)*.48,p[2]+Math.sin(sa)*.32),mat.scale(.105,.105,.105));drawMesh(sphere,sat,vp,1,color.map(v=>Math.min(1,v*.8+.2)),t);});}
     const overlayEl=$('#gameOverlay'),motionQuery=matchMedia('(prefers-reduced-motion: reduce)');let overlayFrame=0;
     function render(now){
@@ -739,9 +791,9 @@ void main(){
       if(overlayEl.classList.contains('open')){lastTime=now/1000;if(now-overlayFrame<250){requestAnimationFrame(render);return;}overlayFrame=now;}
       const dt=Math.min(.04,(now-lastTime*1000||16)/1000);lastTime=now/1000;const motion=motionQuery.matches?.25:1;sceneTime=now*.001*motion;const d=Math.min(devicePixelRatio||1,1.6),w=innerWidth,h=innerHeight;if(w!==cssW||h!==cssH||d!==dpr){cssW=w;cssH=h;dpr=d;canvas.width=Math.round(w*d);canvas.height=Math.round(h*d);canvas.style.width=`${w}px`;canvas.style.height=`${h}px`;gl.viewport(0,0,canvas.width,canvas.height);}
       if(!drag){const forward=[Math.sin(yaw),0,-Math.cos(yaw)],right=[Math.cos(yaw),0,Math.sin(yaw)],speed=dt*4.7;if(keys.KeyW||keys.ArrowUp){eye[0]+=forward[0]*speed;eye[2]+=forward[2]*speed;}if(keys.KeyS||keys.ArrowDown){eye[0]-=forward[0]*speed;eye[2]-=forward[2]*speed;}if(keys.KeyA||keys.ArrowLeft){eye[0]-=right[0]*speed;eye[2]-=right[2]*speed;}if(keys.KeyD||keys.ArrowRight){eye[0]+=right[0]*speed;eye[2]+=right[2]*speed;}if(keys.KeyQ)eye[1]-=speed;if(keys.KeyE)eye[1]+=speed;if(keys.KeyW||keys.KeyS||keys.KeyA||keys.KeyD||keys.ArrowUp||keys.ArrowDown||keys.ArrowLeft||keys.ArrowRight){targetFocus=-1;$('#portalFocus').classList.remove('visible');$('#welcomeHud').classList.add('quiet');}}
-      yaw+=Math.atan2(Math.sin(yawTarget-yaw),Math.cos(yawTarget-yaw))*.055;pitch+=(pitchTarget-pitch)*.055;pitch=Math.max(-.55,Math.min(.55,pitch));eye[0]=Math.max(-16,Math.min(16,eye[0]));eye[1]=Math.max(.6,Math.min(5,eye[1]));eye[2]=Math.max(-11,Math.min(5,eye[2]));
-      gl.disable(gl.DEPTH_TEST);gl.useProgram(skyP);gl.bindBuffer(gl.ARRAY_BUFFER,quad);gl.enableVertexAttribArray(skyL.pos);gl.vertexAttribPointer(skyL.pos,2,gl.FLOAT,false,0,0);const sky=getSky();gl.uniform2f(skyL.res,canvas.width,canvas.height);gl.uniform1f(skyL.time,now*.001*motion);gl.uniform1f(skyL.hour,sky.h);gl.uniform1f(skyL.moon,sky.phase);gl.uniform1f(skyL.doy,sky.doy);updateFog(sunElevation(sky.h,sky.doy));gl.drawArrays(gl.TRIANGLES,0,3);
-      gl.clear(gl.DEPTH_BUFFER_BIT);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);const proj=mat.persp(48*Math.PI/180,w/h,.1,100);const {view}=getView();const vp=mat.mul(proj,view);updateLabels(vp,w,h);drawOrbits(vp);drawGrid(vp);drawCore(vp,sceneTime);drawPortals(vp,sceneTime);
+      yaw+=Math.atan2(Math.sin(yawTarget-yaw),Math.cos(yawTarget-yaw))*.055;pitch+=(pitchTarget-pitch)*.055;pitch=Math.max(-.55,Math.min(.55,pitch));eye[0]=Math.max(-16,Math.min(16,eye[0]));eye[1]=Math.max(.6,Math.min(5,eye[1]));eye[2]=Math.max(-11,Math.min(5,eye[2]));swayYaw=Math.sin(now*.00019)*.014*motion;swayPitch=Math.sin(now*.000147+2.1)*.009*motion;
+      gl.disable(gl.DEPTH_TEST);gl.useProgram(skyP);gl.bindBuffer(gl.ARRAY_BUFFER,quad);gl.enableVertexAttribArray(skyL.pos);gl.vertexAttribPointer(skyL.pos,2,gl.FLOAT,false,0,0);const sky=getSky();gl.uniform2f(skyL.res,canvas.width,canvas.height);gl.uniform1f(skyL.time,now*.001*motion);gl.uniform1f(skyL.hour,sky.h);gl.uniform1f(skyL.moon,sky.phase);gl.uniform1f(skyL.doy,sky.doy);gl.uniform1f(skyL.yaw,yaw+swayYaw);gl.uniform1f(skyL.pitch,pitch+swayPitch);updateFog(sunElevation(sky.h,sky.doy));gl.drawArrays(gl.TRIANGLES,0,3);
+      gl.clear(gl.DEPTH_BUFFER_BIT);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);const proj=mat.persp(48*Math.PI/180,w/h,.1,100);const {view}=getView();const vp=mat.mul(proj,view);updateLabels(vp,w,h);drawOrbits(vp,sceneTime);drawBeads(vp,sceneTime);drawGrid(vp);drawCore(vp,sceneTime);drawPortals(vp,sceneTime);
       if(hover>=0&&mouse.x>=0&&portalElements[hover]){world.style.cursor='pointer';}else world.style.cursor='';requestAnimationFrame(render);}
     world.addEventListener('pointerdown',e=>{mouse={x:e.clientX,y:e.clientY};if(e.target.closest('button,input,textarea,select,a,.welcome-hud,.portal-focus,.demo-hud,.setup-panel,.field-guide'))return;drag={x:e.clientX,y:e.clientY,moved:false};world.setPointerCapture?.(e.pointerId);});
     world.addEventListener('pointermove',e=>{mouse={x:e.clientX,y:e.clientY};if(drag){const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>3)drag.moved=true;if(drag.moved){yawTarget-=dx*.0042;pitchTarget+=dy*.0032;targetFocus=-1;$('#portalFocus').classList.remove('visible');$('#welcomeHud').classList.add('quiet');}drag.x=e.clientX;drag.y=e.clientY;}});
