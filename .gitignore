@@ -1,0 +1,19 @@
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Distribution bundles belong in GitHub Releases, not the repo
+*.zip
+*.tar.gz
+
+# Tooling (this site intentionally has no build step, but keep clones clean)
+node_modules/
+dist/
+.env
+
+# Secrets must never land here — config.js only takes publishable keys
+*.pem
+*.key
+config.local.js
