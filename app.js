@@ -113,7 +113,7 @@
   }
   function selectPortal(index){
     sceneSelectIndex=(index+gameCatalog.length)%gameCatalog.length;const m=gameCatalog[sceneSelectIndex];selectedGame=m.key;
-    if(m.key!=='psych'&&mode==='online'){mode='local';$$('.mode-tab').forEach(b=>b.classList.toggle('active',b.dataset.mode==='local'));$$('.mode-panel').forEach(p=>p.classList.toggle('active',p.id==='localPanel'));}
+    // All seven games support online rooms, so keep the FAR APART tab whatever portal is picked.
     $('#focusIndex').textContent=`PORTAL ${String(sceneSelectIndex+1).padStart(2,'0')} / 07`;
     $('#focusGameKicker').textContent=m.kicker;$('#focusGameTitle').textContent=m.title;$('#setupGameTitle').textContent=m.title;
     $('#focusGameDescription').textContent=m.description;$('#focusRules').innerHTML=m.rules.map((r,i)=>`<div><b>0${i+1}</b> · ${esc(r)}</div>`).join('');
@@ -160,7 +160,7 @@
   }));
   $('#startLocal').addEventListener('click', () => {
     if (names.length < 2) return $('#localError').textContent = 'Add at least one friend. The best lies need an audience.';
-    if(selectedGame!=='psych')mode='local'; usedPrompts.clear(); game = { mode: 'local', gameType:selectedGame, roomCode: 'LOCAL TABLE', hostId: 'local-host', stage: 'answer', round: 1, deck, prompt: pickGamePrompt(selectedGame), questionSet:selectedGame==='threeQ'?threeQuestionSets[Math.floor(Math.random()*threeQuestionSets.length)]:null, players: names.map((name, i) => ({ id: `p${i}-${makeId()}`, name, score: 0 })), submissions: [], votes: [] };
+    usedPrompts.clear(); game = { mode: 'local', gameType:selectedGame, roomCode: 'LOCAL TABLE', hostId: 'local-host', stage: 'answer', round: 1, deck, prompt: pickGamePrompt(selectedGame), questionSet:selectedGame==='threeQ'?threeQuestionSets[Math.floor(Math.random()*threeQuestionSets.length)]:null, players: names.map((name, i) => ({ id: `p${i}-${makeId()}`, name, score: 0 })), submissions: [], votes: [] };
     localAnswerIndex = 0; localVoteIndex = 0; localGate = false; pendingVotes = {}; currentPlayerId = null; closeSetup(); overlayOpen(); render();
   });
 
@@ -224,11 +224,24 @@
     return { code: raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6), key: '' };
   }
   function cacheRoom(session) { localStorage.setItem(`testhem-room-${session.code}`, JSON.stringify(session)); }
-  function setRemoteRoom(session, state) { closeSetup(); remoteSession = session; currentPlayerId = session.playerId; remoteDeck = state.deck || 'odd'; selectedGame = state.gameType || 'psych'; $('#setupGameTitle').textContent = gameCatalog.find(m=>m.key===selectedGame)?.title || 'Psych! The Truth Bluff'; onlineDraftText = ''; onlineDraftTruth = true; onlineDraftVotes = {}; onlineDraftForm = {}; game = { ...state, mode: 'online' }; overlayOpen(); render(); clearInterval(poller); poller = setInterval(loadRemote, 1800); }
+  function setRemoteRoom(session, state) { closeSetup(); remoteSession = session; currentPlayerId = session.playerId; remoteFails = 0; remoteDeck = state.deck || 'odd'; selectedGame = state.gameType || 'psych'; $('#setupGameTitle').textContent = gameCatalog.find(m=>m.key===selectedGame)?.title || 'Psych! The Truth Bluff'; onlineDraftText = ''; onlineDraftTruth = true; onlineDraftVotes = {}; onlineDraftForm = {}; game = { ...state, mode: 'online' }; overlayOpen(); render(); clearInterval(poller); poller = setInterval(loadRemote, 1800); }
+  let remoteFails = 0;
+  const MAX_REMOTE_FAILS = 8;
   async function loadRemote() {
     if (!remoteSession) return;
-    try { const view = await rpc('testhem_get_room', { p_code: remoteSession.code, p_room_key: remoteSession.key, p_player_id: remoteSession.playerId }); const next = { ...view, mode: 'online' }; if (JSON.stringify(next) !== JSON.stringify(game)) { game = next; render(); } }
-    catch (e) { $('#gameContent').innerHTML = `<div class="online-wait"><strong>RECONNECTING TO THE ROOM</strong>${esc(e.message)}</div>`; }
+    try { const view = await rpc('testhem_get_room', { p_code: remoteSession.code, p_room_key: remoteSession.key, p_player_id: remoteSession.playerId }); remoteFails = 0; const next = { ...view, mode: 'online' }; if (JSON.stringify(next) !== JSON.stringify(game)) { game = next; render(); } }
+    catch (e) {
+      remoteFails++;
+      if (remoteFails >= MAX_REMOTE_FAILS) {
+        // The room kept failing for ~15s: stop hammering the server and offer a clean exit.
+        clearInterval(poller); poller = null;
+        $('#gameContent').innerHTML = `<div class="online-wait"><strong>SIGNAL LOST</strong>${esc(e.message)} The room may have ended or your connection dropped.</div><div class="game-actions"><button class="button-secondary" id="retryRemote">TRY RECONNECTING <span>↗</span></button><button class="button-secondary" id="leaveDeadRoom">LEAVE ROOM</button></div>`;
+        $('#retryRemote').addEventListener('click', () => { remoteFails = 0; clearInterval(poller); poller = setInterval(loadRemote, 1800); toast('Trying the room again…'); loadRemote(); });
+        $('#leaveDeadRoom').addEventListener('click', () => { remoteSession = null; game = null; overlayClose(); history.replaceState(null, '', location.pathname + location.search); });
+        return;
+      }
+      $('#gameContent').innerHTML = `<div class="online-wait"><strong>RECONNECTING TO THE ROOM</strong>${esc(e.message)} Retrying automatically… (${remoteFails}/${MAX_REMOTE_FAILS})</div>`;
+    }
   }
   async function onlineAction(action, data = {}) {
     if (!remoteSession) return;
@@ -288,6 +301,7 @@
     let truth = true; $$('.truth-choice button', root).forEach(b => b.addEventListener('click', () => { $$('.truth-choice button', root).forEach(x => x.classList.remove('chosen')); b.classList.add('chosen'); truth = b.dataset.truth === 'true'; }));
     $('#submitLocalAnswer').addEventListener('click', () => { const text = $('#answerText').value.trim(); if (text.length < 3) return toast('A few words is enough.'); game.submissions.push({ id: makeId(), player_id: p.id, text, is_truth: truth, is_pass: false }); nextLocalAnswer(); });
     $('#skipLocal').addEventListener('click', () => { game.submissions.push({ id: makeId(), player_id: p.id, text: '', is_truth: false, is_pass: true }); nextLocalAnswer(); });
+    $('#answerText').focus({ preventScroll: true });
   }
   function renderOtherLocalAnswer(root) {
     const p=game.players[localAnswerIndex]; if(!p){beginLocalVote();return;}
@@ -299,7 +313,7 @@
       root.innerHTML=`<div class="game-eyebrow">${type==='twoTruths'?'TWO TRUTHS & A LIE':'THREE QUESTIONS · ONE BLUFF'}</div><h2>${esc(p.name)}, write three.</h2><p class="game-sub">${type==='twoTruths'?'Enter three statements: two true, one lie.':'Answer all three questions honestly except one answer you invent.'} Pick which one is fake before you lock it in.</p><div class="statement-list">${prompts.map((q,i)=>`<div class="statement-entry"><label><span>0${i+1}</span>${esc(q)}</label><textarea data-statement="${i}" maxlength="150" placeholder="${type==='twoTruths'?'Write a short statement...':'Your answer...'}"></textarea><button type="button" class="lie-select" data-lie="${i}">⌁ &nbsp;THIS ONE IS THE LIE</button></div>`).join('')}</div><div class="game-actions"><button class="button-primary" id="submitSet">LOCK MY THREE <span>↗</span></button><button class="button-secondary" id="skipSet">PASS THIS ROUND</button></div>`;
       let lieIndex=null;$$('[data-lie]',root).forEach(b=>b.addEventListener('click',()=>{$$('[data-lie]',root).forEach(x=>x.classList.remove('selected'));b.classList.add('selected');lieIndex=Number(b.dataset.lie);}));
       $('#submitSet').addEventListener('click',()=>{const items=$$('[data-statement]',root).map(x=>x.value.trim());if(items.some(x=>x.length<2))return toast('Fill all three with a few words.');if(lieIndex===null)return toast('Mark which one is the lie.');game.submissions.push({id:makeId(),player_id:p.id,items,lie_index:lieIndex,is_pass:false});nextLocalAnswer();});
-      $('#skipSet').addEventListener('click',()=>{game.submissions.push({id:makeId(),player_id:p.id,is_pass:true});nextLocalAnswer();});return;
+      $('#skipSet').addEventListener('click',()=>{game.submissions.push({id:makeId(),player_id:p.id,is_pass:true});nextLocalAnswer();});$('[data-statement="0"]',root)?.focus({preventScroll:true});return;
     }
     if(type==='wyr'){
       const [tag,q,hint,a,b]=game.prompt;root.innerHTML=`<div class="game-eyebrow">WOULD YOU RATHER? · YOUR PICK IS SECRET</div><h2>${esc(p.name)}, choose your fate.</h2>${promptMarkup()}<div class="choice-pair"><button data-choice="A"><b>A</b><span>${esc(a)}</span></button><button data-choice="B"><b>B</b><span>${esc(b)}</span></button></div><label class="reason-label">SELL YOUR CHOICE IN ONE LINE</label><textarea class="game-textarea" id="choiceReason" maxlength="120" placeholder="Why is this obviously the better option?"></textarea><div class="game-actions"><button class="button-primary" id="submitChoice">SEAL MY PICK <span>↗</span></button><button class="button-secondary" id="skipChoice">PASS</button></div>`;
@@ -312,12 +326,12 @@
     }
     if(type==='hiddenTruth'){
       root.innerHTML=`<div class="game-eyebrow">HIDDEN TRUTH · ONE SENTENCE, NO NAMES</div><h2>${esc(p.name)}, leave one real clue.</h2>${promptMarkup()}<div class="game-form"><textarea id="hiddenFact" maxlength="150" placeholder="A harmless fact your friends might not know..."></textarea><div class="game-actions"><button class="button-primary" id="submitFact">SEAL THE FACT <span>↗</span></button><button class="button-secondary" id="skipFact">PASS</button></div></div>`;
-      $('#submitFact').addEventListener('click',()=>{const text=$('#hiddenFact').value.trim();if(text.length<4)return toast('A few words is enough.');game.submissions.push({id:makeId(),player_id:p.id,text,is_pass:false});nextLocalAnswer();});$('#skipFact').addEventListener('click',()=>{game.submissions.push({id:makeId(),player_id:p.id,is_pass:true});nextLocalAnswer();});return;
+      $('#submitFact').addEventListener('click',()=>{const text=$('#hiddenFact').value.trim();if(text.length<4)return toast('A few words is enough.');game.submissions.push({id:makeId(),player_id:p.id,text,is_pass:false});nextLocalAnswer();});$('#skipFact').addEventListener('click',()=>{game.submissions.push({id:makeId(),player_id:p.id,is_pass:true});nextLocalAnswer();});$('#hiddenFact').focus({preventScroll:true});return;
     }
     if(type==='questionJar'){
       game.jarQuestions=game.jarQuestions||{};if(!game.jarQuestions[p.id]){const used=Object.values(game.jarQuestions);const choices=jarPrompts.filter(q=>!used.includes(q));game.jarQuestions[p.id]=(choices.length?choices:jarPrompts)[Math.floor(Math.random()*(choices.length||jarPrompts.length))];}
       const q=game.jarQuestions[p.id];root.innerHTML=`<div class="game-eyebrow">QUESTION JAR · DRAWN FOR ${esc(p.name.toUpperCase())}</div><h2>Answer, pass, or spin.</h2><div class="game-prompt"><small>YOUR QUESTION</small><strong>${esc(q)}</strong><em>Share only what feels good. You can pass without explaining.</em></div><div class="game-form"><textarea id="jarAnswer" maxlength="180" placeholder="Your answer (or pass)..."></textarea><div class="game-actions"><button class="button-primary" id="submitJar">DROP IT IN <span>↗</span></button><button class="button-secondary" id="skipJar">PASS THIS QUESTION</button></div></div>`;
-      $('#submitJar').addEventListener('click',()=>{const text=$('#jarAnswer').value.trim();if(text.length<2)return toast('Write a few words, or pass.');game.submissions.push({id:makeId(),player_id:p.id,question:q,text,is_pass:false});nextLocalAnswer();});$('#skipJar').addEventListener('click',()=>{game.submissions.push({id:makeId(),player_id:p.id,question:q,is_pass:true});nextLocalAnswer();});return;
+      $('#submitJar').addEventListener('click',()=>{const text=$('#jarAnswer').value.trim();if(text.length<2)return toast('Write a few words, or pass.');game.submissions.push({id:makeId(),player_id:p.id,question:q,text,is_pass:false});nextLocalAnswer();});$('#skipJar').addEventListener('click',()=>{game.submissions.push({id:makeId(),player_id:p.id,question:q,is_pass:true});nextLocalAnswer();});$('#jarAnswer').focus({preventScroll:true});return;
     }
   }
   function nextLocalAnswer() { localAnswerIndex++; localGate = false; if (localAnswerIndex >= game.players.length) beginLocalVote(); else render(); }
@@ -330,7 +344,7 @@
     const targets = game.submissions.filter(s => !s.is_pass && s.player_id !== p.id);
     if (!targets.length) { game.votes.push({ voter_id: p.id, submission_id: null, guess_truth: false, no_op: true }); return renderLocalVote(root); }
     if (!localGate) {
-      root.innerHTML = `<div class="pass-screen"><span class="pass-lock">◉</span><span class="game-eyebrow">ANSWERS ARE IN · VOTING TIME</span><h2>Pass to ${esc(p.name)}.</h2><p class="game-sub">Guess whether each answer is real or bluff. Your own answer is hidden from the pile and cannot be voted on.</p><button class="button-primary" id="readyVote">I'M ${esc(p.name.toUpperCase())} <span>↗</span></button><div class="progress-label" style="margin-top:15px">${game.votes.length / Math.max(game.players.length, 1) | 0} OF ${game.players.length} BALLOTS COMPLETE</div></div>`;
+      root.innerHTML = `<div class="pass-screen"><span class="pass-lock">◉</span><span class="game-eyebrow">ANSWERS ARE IN · VOTING TIME</span><h2>Pass to ${esc(p.name)}.</h2><p class="game-sub">Guess whether each answer is real or bluff. Your own answer is hidden from the pile and cannot be voted on.</p><button class="button-primary" id="readyVote">I'M ${esc(p.name.toUpperCase())} <span>↗</span></button><div class="progress-label" style="margin-top:15px">${new Set(game.votes.map(v => v.voter_id)).size} OF ${game.players.length} BALLOTS COMPLETE</div></div>`;
       $('#readyVote').addEventListener('click', () => { localGate = true; renderLocalVote(root); }); return;
     }
     if (!targets.length) { game.stage = 'reveal'; return renderReveal(root); }
@@ -501,7 +515,7 @@
     const params = new URLSearchParams(location.hash.replace(/^#/, '')); const code = params.get('join'); const key = params.get('key');
     if (!code || !key) return;
     const prior = savedSession(code);
-    if (prior) { remoteSession = prior; currentPlayerId = prior.playerId; rpc('testhem_get_room', { p_code: prior.code, p_room_key: prior.key, p_player_id: prior.playerId }).then(state => setRemoteRoom(prior, state)).catch(() => { $('#roomInvite').value = location.href; }); }
+    if (prior) { remoteSession = prior; currentPlayerId = prior.playerId; rpc('testhem_get_room', { p_code: prior.code, p_room_key: prior.key, p_player_id: prior.playerId }).then(state => setRemoteRoom(prior, state)).catch(() => { try { localStorage.removeItem(`testhem-room-${prior.code}`); } catch {} remoteSession = null; currentPlayerId = null; history.replaceState(null, '', location.pathname + location.search); mode = 'online'; $$('.mode-tab').forEach(b=>b.classList.toggle('active',b.dataset.mode==='online')); $$('.mode-panel').forEach(p=>p.classList.toggle('active',p.id==='onlinePanel')); openSetup(); onlineError('That room is no longer available. Ask the host for a fresh invite, or start a new room.'); }); }
     else { $$('.mode-tab').forEach(b=>b.classList.toggle('active',b.dataset.mode==='online')); $$('.mode-panel').forEach(p=>p.classList.toggle('active',p.id==='onlinePanel')); mode='online'; $('#roomInvite').value=location.href; resumeRoomAfterIdentity=!userName; openSetup(); }
   }
   initInvite();
@@ -511,31 +525,174 @@
   let focusPortal=()=>{}, resetCamera=()=>{};
   const canvas=$('#universe'),world=$('#world');
   const skyVS=`attribute vec2 aPosition; varying vec2 vUv; void main(){vUv=aPosition*.5+.5;gl_Position=vec4(aPosition,0.,1.);}`;
-  const skyFS=`precision highp float; varying vec2 vUv; uniform vec2 uResolution; uniform float uTime,uSky,uHour,uMoonPhase;
-    float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);} 
-    float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x),f.y);} 
-    float fbm(vec2 p){float v=0.,a=.52;for(int i=0;i<5;i++){v+=a*noise(p);p=p*2.02+vec2(7.1,3.8);a*=.49;}return v;}
-    void main(){vec2 uv=vUv;float aspect=uResolution.x/uResolution.y;float horizon=.245;float h=smoothstep(horizon-.04,.96,uv.y);
-      vec3 zenith=vec3(.018,.037,.084),mid=vec3(.035,.105,.19),horizonCol=vec3(.13,.24,.32);
-      vec3 dawnZen=vec3(.075,.12,.27),dawnMid=vec3(.50,.34,.39),dawnHor=vec3(.99,.59,.36);
-      vec3 dayZen=vec3(.075,.34,.64),dayMid=vec3(.24,.61,.82),dayHor=vec3(.69,.83,.86);
-      vec3 duskZen=vec3(.045,.045,.15),duskMid=vec3(.37,.19,.38),duskHor=vec3(.97,.40,.28);
-      vec3 nCol=mix(horizonCol,mix(mid,zenith,smoothstep(.18,.9,h)),h);
-      vec3 dwn=mix(dawnHor,mix(dawnMid,dawnZen,smoothstep(.14,1.,h)),h);
-      vec3 day=mix(dayHor,mix(dayMid,dayZen,smoothstep(.15,1.,h)),h);
-      vec3 dsk=mix(duskHor,mix(duskMid,duskZen,smoothstep(.16,1.,h)),h);
-      vec3 col=nCol;if(uSky<.5)col=nCol;else if(uSky<1.5)col=dwn;else if(uSky<2.5)col=day;else col=dsk;
-      float flow=uTime*.003;float cloudA=fbm(vec2(uv.x*3.0+flow,uv.y*10.0-flow*.35));float cloudB=fbm(vec2(uv.x*7.3-flow*.55,uv.y*19.0+flow*.2));float cloudBand=1.-smoothstep(.18,.55,uv.y);float cloudMask=smoothstep(.53,.79,cloudA*.72+cloudB*.28)*cloudBand;
-      vec3 cloudNight=vec3(.25,.34,.48),cloudDay=vec3(.91,.95,.97),cloudDawn=vec3(.97,.64,.51),cloudDusk=vec3(.82,.38,.36);vec3 cloudCol=uSky<.5?cloudNight:(uSky<1.5?cloudDawn:(uSky<2.5?cloudDay:cloudDusk));
-      float cloudOpacity=cloudMask*(uSky<.5?.32:.48);col=mix(col,cloudCol,cloudOpacity);
-      float hourAngle=(uHour-12.)/12.*3.14159265;float sunX=.5+.38*cos(hourAngle);float daylight=clamp((sin((uHour-6.)/12.*3.14159265)+.15)*1.5,0.,1.);float sunY=.28+.52*max(0.,sin((uHour-6.)/12.*3.14159265));vec2 sunPos=vec2(sunX,sunY);float sd=length((uv-sunPos)*vec2(aspect,1.));float sunGlow=exp(-sd*sd*180.);float sunDisk=1.-smoothstep(.009,.013,sd);vec3 sunColor=uSky<1.5?vec3(1.,.73,.51):vec3(1.,.91,.72);col+=sunColor*sunGlow*(uSky==2.? .55:.9);col=mix(col,sunColor,sunDisk*daylight*.9);
-      vec2 moonPos=vec2(.76,.67);vec2 mxy=(uv-moonPos)*vec2(aspect,1.);float md=length(mxy);float moonEdge=1.-smoothstep(.025,.028,md);float mx=mxy.x/.026;float my=mxy.y/.026;float sphereZ=sqrt(max(0.,1.-mx*mx-my*my));float phaseAngle=uMoonPhase*6.2831853;vec3 moonNormal=normalize(vec3(mx,my,sphereZ));float moonLight=max(dot(moonNormal,normalize(vec3(cos(phaseAngle),sin(phaseAngle),.72))),0.);float moonGate=1.-smoothstep(.008,.04,daylight);vec3 moonColor=mix(vec3(.34,.43,.58),vec3(.90,.91,.79),.35+.65*moonLight);col+=vec3(.25,.37,.62)*exp(-md*md*110.)*.13*moonGate;col=mix(col,moonColor,moonEdge*moonGate*(.25+.75*moonLight));
-      vec2 cells=uv*vec2(250.,130.);vec2 id=floor(cells),f=fract(cells)-.5;float rnd=hash(id);float star=(1.-smoothstep(.008,.035,length(f)))*step(.992,rnd);float twinkle=.55+.45*sin(uTime*(1.1+hash(id+13.)*2.5)+rnd*45.);float night=1.-smoothstep(.15,.75,daylight);col+=mix(vec3(.61,.75,.98),vec3(.83,.73,1.),hash(id+5.))*star*twinkle*night*.8;
-      float milky=fbm(vec2(uv.x*5.+uv.y*2.,uv.y*5.-flow*.4));float band=exp(-pow((uv.x*.55+uv.y*.72-.65),2.)*45.);col+=vec3(.22,.31,.50)*band*milky*night*.11;
-      float haze=exp(-pow((uv.y-horizon)*13.,2.));col+=mix(vec3(.48,.30,.30),vec3(.60,.76,.86),smoothstep(.15,.7,daylight))*haze*(uSky==1.||uSky==3.? .18:.11);
-      float vig=1.-smoothstep(.45,1.15,length((uv-.5)*vec2(aspect*.78,1.)));col*=.78+.22*vig;gl_FragColor=vec4(col,1.);}`;
+  const skyFS=`precision highp float;
+varying vec2 vUv;
+uniform vec2 uResolution;
+uniform float uTime,uHour,uMoonPhase,uDoy;
+
+float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);vec2 u=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1.,0.)),u.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),u.x),u.y);}
+float fbm3(vec2 p){float v=0.,a=.5;for(int i=0;i<3;i++){v+=a*noise(p);p=p*1.97+vec2(5.3,1.7);a*=.5;}return v;}
+float fbm5(vec2 p){float v=0.,a=.5;for(int i=0;i<5;i++){v+=a*noise(p);p=p*2.02+vec2(9.7,3.1);a*=.5;}return v;}
+
+void main(){
+  vec2 uv=vUv;
+  float aspect=uResolution.x/uResolution.y;
+
+  // ---- sun path: civil hour + seasonal declination (fixed 20N, no geolocation)
+  float decl=-0.4091*cos((uDoy+10.)/365.25*6.28318);
+  float lat=0.3491;
+  float ha=(uHour-12.)/12.*3.14159;
+  float sinEl=sin(lat)*sin(decl)+cos(lat)*cos(decl)*cos(ha);
+  float sunEl=asin(clamp(sinEl,-1.,1.))/1.5708;            // -1..1 elevation
+  float dayW=smoothstep(-0.06,0.18,sunEl);                 // daylight weight
+  float golden=exp(-pow((sunEl-0.03)*6.5,2.));             // golden-hour band
+  float nightW=1.-smoothstep(-0.20,0.02,sunEl);               // deep-night weight
+  float sunX=0.5+0.46*sin(ha);
+  float sunY=0.235+max(sunEl,-0.16)*0.66;
+
+  // ---- base atmosphere gradient
+  float h=clamp((uv.y-0.20)/0.78,0.,1.);
+  vec3 nightCol=mix(vec3(0.016,0.034,0.070),vec3(0.004,0.010,0.030),pow(h,0.72));
+  vec3 dayCol=mix(vec3(0.630,0.790,0.905),vec3(0.180,0.430,0.740),pow(h,0.80));
+  vec3 col=mix(nightCol,dayCol,dayW);
+
+  // warm forward scatter around the sun azimuth (twilight + low sun)
+  float az=exp(-pow((uv.x-sunX)*2.4,2.));
+  float lowBand=exp(-pow(h*1.9,2.));
+  vec3 scatterC=mix(vec3(1.00,0.42,0.16),vec3(1.00,0.66,0.36),h);
+  float fwd=clamp(golden*az*lowBand*1.25+dayW*az*exp(-pow((sunEl-0.35)*3.,2.))*0.14,0.,1.);
+  col=mix(col,scatterC,fwd);
+  // Belt of Venus: violet band above the glow at twilight
+  col+=vec3(0.32,0.13,0.30)*golden*az*exp(-pow((h-0.30)*4.5,2.))*0.55;
+
+  // ---- sun disc + bloom
+  vec2 sp=vec2(sunX,sunY);
+  float sd=length((uv-sp)*vec2(aspect,1.));
+  float svis=max(dayW,golden*0.85);
+  col+=scatterC*exp(-sd*2.6)*0.22*(golden+dayW*0.5);
+  col+=mix(vec3(1.,0.55,0.25),vec3(1.,0.92,0.72),dayW)*(exp(-sd*14.)*0.9+exp(-sd*4.5)*0.25)*svis;
+  float disc=1.-smoothstep(0.0095,0.0125,sd);
+  col=mix(col,vec3(1.,0.97,0.90),disc*smoothstep(0.02,0.10,sunEl));
+
+  // ---- stars: two magnitude tiers, color variation, twinkle, milky way
+  float starGate=nightW*smoothstep(0.16,0.30,uv.y);
+  vec2 g1=uv*vec2(300.,170.);vec2 id1=floor(g1),f1=fract(g1)-.5;
+  float r1=hash(id1);
+  float s1=1.-smoothstep(0.0,0.05,length(f1))*step(0.972,r1)*0.55;
+  vec2 g2=uv*vec2(150.,85.);vec2 id2=floor(g2),f2=fract(g2)-.5;
+  float r2=hash(id2+71.3);
+  float s2=1.-smoothstep(0.0,0.09,length(f2))*step(0.965,r2)*1.35;
+  float tw=0.6+0.4*sin(uTime*(0.8+r1*3.)+r1*43.)*(0.6+0.4*sin(uTime*0.7+r2*29.));
+  vec3 sC=mix(vec3(0.70,0.80,1.0),vec3(1.0,0.86,0.70),hash(id2+3.1));
+  col+=sC*(s1+s2)*(0.55+0.45*tw)*starGate;
+  float band=exp(-pow((uv.x*0.55+uv.y*0.85-0.80),2.)*34.);
+  col+=vec3(0.26,0.34,0.56)*band*(0.35+0.65*fbm3(uv*vec2(4.,9.)))*starGate*0.55;
+
+  // ---- moon with phase-lit maria/craters
+  vec2 mp=vec2(0.735,0.66);
+  vec2 mq=(uv-mp)*vec2(aspect,1.);
+  float md=length(mq);
+  float mR=0.028;
+  float inM=1.-smoothstep(mR*0.955,mR,md);
+  vec2 mm=mq/mR;
+  float mz=sqrt(max(0.,1.-dot(mm,mm)));
+  float ph=uMoonPhase*6.28318;
+  vec3 ld=normalize(vec3(cos(ph),0.35*sin(ph)+0.15,0.72));
+  float li=clamp(dot(normalize(vec3(mm.x,mm.y,mz)),ld),0.,1.);
+  float crat=0.72+0.55*fbm3(mm*3.4+7.3);
+  vec3 moonC=mix(vec3(0.10,0.13,0.20),vec3(0.93,0.94,0.88)*crat,li);
+  float mgate=nightW+golden*0.55;
+  col=mix(col,moonC,inM*mgate);
+  col+=vec3(0.55,0.66,0.92)*exp(-md*6.5)*0.10*mgate;
+
+  // ---- clouds: domain-warped fbm, drifting, lit by sun and moon
+  vec2 cuv=vec2(uv.x*2.4+uTime*0.0075,uv.y*5.6-uTime*0.0018);
+  float w1=fbm3(cuv*1.35);
+  float w2=fbm3(cuv*1.35+5.2);
+  float cl=fbm5(cuv+vec2(w1,w2)*0.65);
+  float cover=smoothstep(0.46,0.72,cl)*smoothstep(0.03,0.20,uv.y);
+  float lit=smoothstep(0.46,0.95,cl);
+  vec3 cd=mix(vec3(0.62,0.68,0.78),vec3(1.02,1.00,0.97),lit);
+  vec3 cn=mix(vec3(0.045,0.065,0.105),vec3(0.16,0.20,0.30),lit*0.8+0.15*exp(-md*3.)*mgate);
+  vec3 cc=mix(cn,cd,dayW);
+  cc=mix(cc,vec3(1.0,0.56,0.30),golden*az*0.85*lit);        // golden rims toward the sun
+  cc+=vec3(0.9,0.95,1.)*exp(-md*5.)*0.10*mgate*lit;          // moonlit silver lining
+  col=mix(col,cc,cover*0.88);
+  // wispy cirrus aloft
+  float cir=smoothstep(0.60,0.88,fbm3(cuv*3.2-vec2(w2,w1)*0.4))*0.16*smoothstep(0.35,0.75,uv.y)*(0.4+0.6*dayW);
+  col=mix(col,mix(cn*1.4,cd,dayW),cir);
+
+  // ---- horizon haze + sun-side ground glow
+  col+=mix(vec3(0.03,0.05,0.09),vec3(0.50,0.60,0.72),dayW)*exp(-pow((uv.y-0.232)*8.5,2.))*0.22;
+  col+=scatterC*exp(-pow((uv.y-0.245)*11.,2.))*golden*az*0.38;
+
+  // ---- occasional meteor (night only, every ~27s)
+  float cyc=uTime/27.;
+  float n=floor(cyc),pp=fract(cyc);
+  vec2 hA=vec2(hash(vec2(n,1.7)),hash(vec2(n,9.2)));
+  vec2 dir=normalize(vec2(0.75+0.45*hash(vec2(n,3.3)),-0.30-0.28*hash(vec2(n,5.1))));
+  vec2 org=vec2(0.08+0.8*hA.x,0.55+0.38*hA.y);
+  float head=pp*30.;
+  if(head<1.&&nightW>0.05){
+    vec2 hd=org+dir*head*0.66;
+    vec2 dv=uv-hd; dv.x*=aspect;
+    float paral=dot(dv,-dir);
+    float perp=dot(dv,vec2(-dir.y,dir.x));
+    float streak=exp(-perp*perp*3200.)*exp(-max(paral,0.)*22.)*step(0.,paral)*exp(-head*2.4);
+    col+=vec3(0.85,0.92,1.)*streak*nightW*1.4;
+  }
+
+  // vignette
+  float vig=1.-smoothstep(0.45,1.25,length((uv-.5)*vec2(aspect*.8,1.)));
+  col*=0.80+0.20*vig;
+  gl_FragColor=vec4(col,1.);
+}`;
   const objVS=`attribute vec3 aPosition;attribute vec3 aNormal;uniform mat4 uMVP,uModel;varying vec3 vNormal,vWorld,vLocal;void main(){vec4 w=uModel*vec4(aPosition,1.);vWorld=w.xyz;vLocal=aPosition;vNormal=normalize(mat3(uModel)*aNormal);gl_Position=uMVP*vec4(aPosition,1.);}`;
-  const objFS=`precision highp float;uniform float uKind,uTime;uniform vec3 uTint,uLight;varying vec3 vNormal,vWorld,vLocal;void main(){vec3 N=normalize(vNormal),L=normalize(uLight-vWorld),V=normalize(vec3(0.,1.,5.)-vWorld);float diff=max(dot(N,L),0.);float fres=pow(1.-max(dot(N,V),0.),2.2);float pulse=.78+.22*sin(uTime*1.7+uTint.r*8.);if(uKind>10.5){if(uKind<11.5){vec3 c=uTint*(.82+.5*diff)+uTint*fres*.65;gl_FragColor=vec4(c,1.);}else{float bands=.5+.5*sin(vLocal.x*9.+uTime*1.4);vec3 c=uTint*(.35+fres*1.6)*pulse+vec3(.12,.17,.26)*bands;gl_FragColor=vec4(c,.60); }return;}float lit=.18+.82*diff;vec3 c=uTint*lit+uTint*fres*.28;gl_FragColor=vec4(c,1.);}`;
+  const objFS=`precision highp float;
+uniform float uKind,uTime;
+uniform vec3 uTint,uLight,uFog,uCam;
+varying vec3 vNormal,vWorld,vLocal;
+float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);vec2 u=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1.,0.)),u.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),u.x),u.y);}
+float fbm(vec2 p){float v=0.,a=.5;for(int i=0;i<4;i++){v+=a*noise(p);p=p*2.03+vec2(9.2,4.7);a*=.5;}return v;}
+void main(){
+  vec3 N=normalize(vNormal);
+  vec3 L=normalize(uLight-vWorld);
+  vec3 V=normalize(uCam-vWorld);
+  float diff=max(dot(N,L),0.);
+  float fres=pow(1.-max(dot(N,V),0.),2.4);
+  float spec=pow(max(dot(reflect(-L,N),V),0.),42.);
+  vec3 c;
+  float alpha=1.;
+  if(uKind>11.5){
+    // portal energy core: animated vortex disc with spiral arms and hot center
+    float r=length(vLocal.xy);
+    float an=atan(vLocal.y,vLocal.x);
+    float sw=fbm(vec2(an*1.6+r*3.5-uTime*1.1,r*5.5-uTime*0.7));
+    float arms=0.5+0.5*sin(an*3.+r*8.-uTime*2.4+sw*3.);
+    float core=exp(-r*3.6)*1.7;
+    float edge=1.-smoothstep(0.62,1.02,r);
+    float glow=(sw*0.75+arms*0.55)*edge+core;
+    c=uTint*glow*1.25+vec3(1.,1.,1.)*core*0.30;
+    alpha=clamp(glow*0.5+0.28,0.,1.)*edge;
+  }else if(uKind>10.5){
+    // metallic portal ring: brushed band, streak specular, colored fresnel rim
+    float band=0.92+0.08*sin(atan(vLocal.y,vLocal.x)*26.+uTime*0.6);
+    c=uTint*(0.30+0.75*diff)*band+uTint*fres*0.9+vec3(1.,0.96,0.86)*spec*1.6;
+  }else if(uKind>1.5){
+    // observatory core star: hot emitter with slow flare
+    float flick=0.9+0.1*sin(uTime*3.1+vLocal.x*9.);
+    c=uTint*(1.05+0.35*diff)*flick*1.35+uTint*fres*0.5;
+  }else{
+    // satellites / standard objects
+    c=uTint*(0.20+0.80*diff)+uTint*fres*0.30+vec3(1.,0.97,0.90)*spec*0.35;
+  }
+  // aerial perspective into the time-of-day horizon color
+  float fogF=1.-exp(-distance(uCam,vWorld)*0.024);
+  c=mix(c,uFog,fogF*0.7);
+  gl_FragColor=vec4(c,alpha);
+}`;
   const lineVS=`attribute vec3 aPosition;uniform mat4 uMVP;void main(){gl_Position=uMVP*vec4(aPosition,1.);}`;
   const lineFS=`precision mediump float;uniform vec4 uColor;void main(){gl_FragColor=uColor;}`;
   function shader(gl,type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){console.warn(gl.getShaderInfoLog(s));return null;}return s;}
@@ -547,11 +704,12 @@
   function rgb(hex){const n=parseInt(String(hex).replace('#',''),16);return[((n>>16)&255)/255,((n>>8)&255)/255,(n&255)/255];}
   function initWebGL(){
     let gl;try{gl=canvas.getContext('webgl',{alpha:false,antialias:true,powerPreference:'high-performance'});}catch(e){}if(!gl){document.body.classList.add('webgl-fallback');return;}
+    canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();document.body.classList.add('webgl-fallback');});
     const skyP=program(gl,skyVS,skyFS),objP=program(gl,objVS,objFS),lineP=program(gl,lineVS,lineFS);if(!skyP||!objP||!lineP){document.body.classList.add('webgl-fallback');return;}
     const quad=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,quad);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);const sphere=sphereMesh(gl),torus=torusMesh(gl);const gridData=[];for(let x=-16;x<=16;x+=1)gridData.push(x,-.7,-5,x,-.7,-32);for(let z=-5;z>=-32;z-=1)gridData.push(-16,-.7,z,16,-.7,z);const gridBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,gridBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(gridData),gl.STATIC_DRAW);const orbitBuffers=orbitRadii.map((r,i)=>{const a=[];for(let j=0;j<=180;j++){const q=j/180*Math.PI*2;a.push(Math.cos(q)*r,orbitCenter[1]+Math.sin(q+orbitPhases[i]*.37)*r*.055,orbitCenter[2]+Math.sin(q)*r*orbitTilts[i]);}const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(a),gl.STATIC_DRAW);return{buffer:b,count:a.length/3};});
     const loc=(p,n)=>gl.getAttribLocation(p,n),un=(p,n)=>gl.getUniformLocation(p,n);
-    const skyL={pos:loc(skyP,'aPosition'),res:un(skyP,'uResolution'),time:un(skyP,'uTime'),sky:un(skyP,'uSky'),hour:un(skyP,'uHour'),moon:un(skyP,'uMoonPhase')};
-    const objL={pos:loc(objP,'aPosition'),normal:loc(objP,'aNormal'),mvp:un(objP,'uMVP'),model:un(objP,'uModel'),kind:un(objP,'uKind'),time:un(objP,'uTime'),tint:un(objP,'uTint'),light:un(objP,'uLight')};
+    const skyL={pos:loc(skyP,'aPosition'),res:un(skyP,'uResolution'),time:un(skyP,'uTime'),hour:un(skyP,'uHour'),moon:un(skyP,'uMoonPhase'),doy:un(skyP,'uDoy')};
+    const objL={pos:loc(objP,'aPosition'),normal:loc(objP,'aNormal'),mvp:un(objP,'uMVP'),model:un(objP,'uModel'),kind:un(objP,'uKind'),time:un(objP,'uTime'),tint:un(objP,'uTint'),light:un(objP,'uLight'),fog:un(objP,'uFog'),cam:un(objP,'uCam')};
     const lineL={pos:loc(lineP,'aPosition'),mvp:un(lineP,'uMVP'),color:un(lineP,'uColor')};
     let cssW=0,cssH=0,dpr=1;const eye=[0,1.55,1.0];let yaw=0,pitch=.015,yawTarget=0,pitchTarget=.015;let keys={},drag=null,mouse={x:-999,y:-999},selectedScreen=[];let lastTime=0,sceneTime=0,hover=-1;
     const orbitRadii=[7.8,7.2,6.6,6.0,6.6,7.2,7.8],orbitPhases=[2.65,2.35,1.98,1.57,1.15,.8,.5],orbitRates=[.052,.058,.067,.08,.067,.058,.052],orbitTilts=[.23,.27,.31,.35,.39,.43,.47],orbitCenter=[0,2.05,-17];
@@ -559,27 +717,40 @@
     function getView(){const cp=Math.cos(pitch),dir=[Math.sin(yaw)*cp,Math.sin(pitch),-Math.cos(yaw)*cp];const center=[eye[0]+dir[0],eye[1]+dir[1],eye[2]+dir[2]];return{dir,view:mat.look(eye,center)};}
     function portalTarget(i){const p=portalAt(i,sceneTime);const dx=p[0]-eye[0],dy=p[1]-eye[1],dz=p[2]-eye[2];yawTarget=Math.atan2(dx,-dz);pitchTarget=Math.atan2(dy,Math.hypot(dx,dz));}
     focusPortal=i=>portalTarget(i);resetCamera=()=>{eye[0]=0;eye[1]=1.55;eye[2]=1;yawTarget=0;pitchTarget=.015;};
-    const getSky=()=>{const h=new Date().getHours()+new Date().getMinutes()/60;let sky=0;if(h>=5&&h<8)sky=1;else if(h>=8&&h<17)sky=2;else if(h>=17&&h<20)sky=3;const phase=((Date.now()/86400000+4.867)%29.53059)/29.53059;return{h,sky,phase};};
+    // Device-local civil time drives the whole sky: sun path, twilight, moon phase, cloud light.
+    const getSky=()=>{const now=new Date();const h=now.getHours()+now.getMinutes()/60+now.getSeconds()/3600;const phase=((Date.now()/86400000+4.867)%29.53059)/29.53059;const doy=Math.floor((now-new Date(now.getFullYear(),0,0))/864e5);return{h,phase,doy};};
+    const sstep=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
+    const sunElevation=(h,doy)=>{const decl=-0.4091*Math.cos((doy+10)/365.25*2*Math.PI);const lat=0.3491;const ha=(h-12)/12*Math.PI;return Math.asin(Math.max(-1,Math.min(1,Math.sin(lat)*Math.sin(decl)+Math.cos(lat)*Math.cos(decl)*Math.cos(ha))))/(Math.PI/2);};
+    // Matches the sky shader's horizon palette so 3D objects fade into the actual sky.
+    let fogNow=[0.02,0.04,0.07];
+    function updateFog(sunEl){const dayW=sstep(-0.06,0.18,sunEl);const golden=Math.exp(-Math.pow((sunEl-0.03)*6.5,2));const m=(a,b,t)=>a+(b-a)*t;fogNow=[m(0.016,0.55,dayW)+golden*0.10,m(0.034,0.62,dayW)+golden*0.03,m(0.070,0.75,dayW)+golden*0.005];}
     const portalPositionsFor=()=>gameCatalog.map((_,i)=>portalAt(i,sceneTime));
-    function drawMesh(meshObj,model,vp,kind,tint,time,alpha=false){gl.useProgram(objP);gl.bindBuffer(gl.ARRAY_BUFFER,meshObj.pb);gl.enableVertexAttribArray(objL.pos);gl.vertexAttribPointer(objL.pos,3,gl.FLOAT,false,0,0);gl.bindBuffer(gl.ARRAY_BUFFER,meshObj.nb);gl.enableVertexAttribArray(objL.normal);gl.vertexAttribPointer(objL.normal,3,gl.FLOAT,false,0,0);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,meshObj.ib);gl.uniformMatrix4fv(objL.mvp,false,mat.mul(vp,model));gl.uniformMatrix4fv(objL.model,false,model);gl.uniform1f(objL.kind,kind);gl.uniform1f(objL.time,time);gl.uniform3fv(objL.tint,tint);gl.uniform3f(objL.light,0,6,4);if(alpha){gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);}gl.drawElements(gl.TRIANGLES,meshObj.count,gl.UNSIGNED_SHORT,0);if(alpha){gl.depthMask(true);gl.disable(gl.BLEND);}}
+    function drawMesh(meshObj,model,vp,kind,tint,time,alpha=false){gl.useProgram(objP);gl.bindBuffer(gl.ARRAY_BUFFER,meshObj.pb);gl.enableVertexAttribArray(objL.pos);gl.vertexAttribPointer(objL.pos,3,gl.FLOAT,false,0,0);gl.bindBuffer(gl.ARRAY_BUFFER,meshObj.nb);gl.enableVertexAttribArray(objL.normal);gl.vertexAttribPointer(objL.normal,3,gl.FLOAT,false,0,0);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,meshObj.ib);gl.uniformMatrix4fv(objL.mvp,false,mat.mul(vp,model));gl.uniformMatrix4fv(objL.model,false,model);gl.uniform1f(objL.kind,kind);gl.uniform1f(objL.time,time);gl.uniform3fv(objL.tint,tint);gl.uniform3f(objL.light,0,6,4);gl.uniform3fv(objL.fog,fogNow);gl.uniform3f(objL.cam,eye[0],eye[1],eye[2]);if(alpha){gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);}gl.drawElements(gl.TRIANGLES,meshObj.count,gl.UNSIGNED_SHORT,0);if(alpha){gl.depthMask(true);gl.disable(gl.BLEND);}}
     function project(p,vp,w,h){const q=[p[0],p[1],p[2],1],c=[0,0,0,0];for(let i=0;i<4;i++)c[i]=vp[i]*q[0]+vp[4+i]*q[1]+vp[8+i]*q[2]+vp[12+i];if(c[3]<=.05)return null;const nx=c[0]/c[3],ny=c[1]/c[3],nz=c[2]/c[3];return{x:(nx*.5+.5)*w,y:(1-(ny*.5+.5))*h,z:nz,visible:nz>-1.1&&nz<1.1};}
     function drawGrid(vp){gl.useProgram(lineP);gl.bindBuffer(gl.ARRAY_BUFFER,gridBuffer);gl.enableVertexAttribArray(lineL.pos);gl.vertexAttribPointer(lineL.pos,3,gl.FLOAT,false,0,0);gl.uniformMatrix4fv(lineL.mvp,false,vp);gl.uniform4f(lineL.color,.38,.59,.73,.12);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.drawArrays(gl.LINES,0,gridData.length/3);gl.disable(gl.BLEND);}
-    function drawOrbits(vp){gl.useProgram(lineP);gl.enableVertexAttribArray(lineL.pos);gl.uniformMatrix4fv(lineL.mvp,false,vp);gl.uniform4f(lineL.color,.49,.66,.84,.25);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);orbitBuffers.forEach(o=>{gl.bindBuffer(gl.ARRAY_BUFFER,o.buffer);gl.vertexAttribPointer(lineL.pos,3,gl.FLOAT,false,0,0);gl.drawArrays(gl.LINE_STRIP,0,o.count);});gl.depthMask(true);gl.disable(gl.BLEND);}
-    function drawCore(vp,t){const base=mat.trans(...orbitCenter);const star=mat.mul(base,mat.scale(.4,.4,.4));drawMesh(sphere,star,vp,1,[1,.63,.27],t);const halo=mat.mul(base,mat.mul(mat.rx(.22),mat.scale(.72,.72,.72)));drawMesh(torus,halo,vp,11,[1,.62,.25],t);}
-    function updateLabels(vp,w,h){selectedScreen=portalPositionsFor().map((p,i)=>project(p,vp,w,h));let nearest=-1,dist=76;selectedScreen.forEach((p,i)=>{const el=portalElements[i];if(!p||!p.visible){el.style.opacity='0';el.style.pointerEvents='none';return;}el.style.left=`${p.x}px`;el.style.top=`${p.y}px`;el.style.opacity=p.z>.94?'.35':'1';el.style.pointerEvents=p.z>.98?'none':'auto';const d=Math.hypot(mouse.x-p.x,mouse.y-p.y);if(d<dist){dist=d;nearest=i;}});hover=nearest;portalElements.forEach((e,i)=>e.classList.toggle('is-hovered',i===hover));$('#worldCoords').textContent=`X ${eye[0].toFixed(1)} · Z ${eye[2].toFixed(1)}`;}
-    function drawPortals(vp,t){gameCatalog.forEach((game,i)=>{const p=portalAt(i,t),color=rgb(game.color),hovered=i===hover,selected=i===sceneSelectIndex&&$('#portalFocus').classList.contains('visible');const s=hovered||selected?1.08:1;const a=orbitPhases[i]+t*orbitRates[i];const base=mat.mul(mat.trans(p[0],p[1],p[2]),mat.mul(mat.ry(Math.sin(a)*.055),mat.rz(Math.sin(a*.5)*.018)));const ringModel=mat.mul(base,mat.scale(.92*s,1.12*s,.92*s));drawMesh(torus,ringModel,vp,11,color,t);const innerModel=mat.mul(base,mat.scale(.70*s,.88*s,.095));drawMesh(sphere,innerModel,vp,12,color,t,true);const innerRing=mat.mul(base,mat.mul(mat.rx(.02),mat.scale(.77*s,.94*s,.78*s)));drawMesh(torus,innerRing,vp,11,color.map(v=>Math.min(1,v*1.25+.1)),t);const sa=t*(.31+i*.025)+orbitPhases[i],sat=mat.mul(mat.trans(p[0]+Math.cos(sa)*1.3,p[1]+Math.sin(sa)*.48,p[2]+Math.sin(sa)*.32),mat.scale(.105,.105,.105));drawMesh(sphere,sat,vp,1,color.map(v=>Math.min(1,v*.8+.2)),t);});}
-    function render(now){const dt=Math.min(.04,(now-lastTime*1000||16)/1000);lastTime=now/1000;const motion=matchMedia('(prefers-reduced-motion: reduce)').matches?.25:1;sceneTime=now*.001*motion;const d=Math.min(devicePixelRatio||1,1.6),w=innerWidth,h=innerHeight;if(w!==cssW||h!==cssH||d!==dpr){cssW=w;cssH=h;dpr=d;canvas.width=Math.round(w*d);canvas.height=Math.round(h*d);canvas.style.width=`${w}px`;canvas.style.height=`${h}px`;gl.viewport(0,0,canvas.width,canvas.height);}
+    function drawOrbits(vp){gl.useProgram(lineP);gl.enableVertexAttribArray(lineL.pos);gl.uniformMatrix4fv(lineL.mvp,false,vp);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);orbitBuffers.forEach((o,i)=>{const c=rgb(gameCatalog[i].color);gl.uniform4f(lineL.color,c[0],c[1],c[2],.15);gl.bindBuffer(gl.ARRAY_BUFFER,o.buffer);gl.vertexAttribPointer(lineL.pos,3,gl.FLOAT,false,0,0);gl.drawArrays(gl.LINE_STRIP,0,o.count);});gl.depthMask(true);gl.disable(gl.BLEND);}
+    function drawCore(vp,t){const base=mat.trans(...orbitCenter);const star=mat.mul(base,mat.scale(.4,.4,.4));drawMesh(sphere,star,vp,2,[1,.63,.27],t);const halo=mat.mul(base,mat.mul(mat.rx(.22),mat.scale(.72,.72,.72)));drawMesh(torus,halo,vp,11,[1,.62,.25],t);}
+    const worldCoordsEl=$('#worldCoords');let lastCoords='';
+    function updateLabels(vp,w,h){selectedScreen=portalPositionsFor().map((p,i)=>project(p,vp,w,h));let nearest=-1,dist=76;selectedScreen.forEach((p,i)=>{const el=portalElements[i];if(!p||!p.visible){el.style.opacity='0';el.style.pointerEvents='none';return;}el.style.left=`${p.x}px`;el.style.top=`${p.y}px`;el.style.opacity=p.z>.94?'.35':'1';el.style.pointerEvents=p.z>.98?'none':'auto';const d=Math.hypot(mouse.x-p.x,mouse.y-p.y);if(d<dist){dist=d;nearest=i;}});hover=nearest;portalElements.forEach((e,i)=>e.classList.toggle('is-hovered',i===hover));const coords=`X ${eye[0].toFixed(1)} · Z ${eye[2].toFixed(1)}`;if(coords!==lastCoords){worldCoordsEl.textContent=coords;lastCoords=coords;}}
+    function drawPortals(vp,t){const focusVisible=$('#portalFocus').classList.contains('visible');gameCatalog.forEach((game,i)=>{const p=portalAt(i,t),color=rgb(game.color),hovered=i===hover,selected=i===sceneSelectIndex&&focusVisible;const s=hovered||selected?1.08:1;const a=orbitPhases[i]+t*orbitRates[i];const base=mat.mul(mat.trans(p[0],p[1],p[2]),mat.mul(mat.ry(Math.sin(a)*.055),mat.rz(Math.sin(a*.5)*.018)));const ringModel=mat.mul(base,mat.scale(.92*s,1.12*s,.92*s));drawMesh(torus,ringModel,vp,11,color,t);const innerModel=mat.mul(base,mat.scale(.70*s,.88*s,.095));drawMesh(sphere,innerModel,vp,12,color,t,true);const innerRing=mat.mul(base,mat.mul(mat.rx(.02),mat.scale(.77*s,.94*s,.78*s)));drawMesh(torus,innerRing,vp,11,color.map(v=>Math.min(1,v*1.25+.1)),t);const sa=t*(.31+i*.025)+orbitPhases[i],sat=mat.mul(mat.trans(p[0]+Math.cos(sa)*1.3,p[1]+Math.sin(sa)*.48,p[2]+Math.sin(sa)*.32),mat.scale(.105,.105,.105));drawMesh(sphere,sat,vp,1,color.map(v=>Math.min(1,v*.8+.2)),t);});}
+    const overlayEl=$('#gameOverlay'),motionQuery=matchMedia('(prefers-reduced-motion: reduce)');let overlayFrame=0;
+    function render(now){
+      // The game overlay is opaque, so the scene behind it only needs a slow repaint while it is open.
+      if(overlayEl.classList.contains('open')){lastTime=now/1000;if(now-overlayFrame<250){requestAnimationFrame(render);return;}overlayFrame=now;}
+      const dt=Math.min(.04,(now-lastTime*1000||16)/1000);lastTime=now/1000;const motion=motionQuery.matches?.25:1;sceneTime=now*.001*motion;const d=Math.min(devicePixelRatio||1,1.6),w=innerWidth,h=innerHeight;if(w!==cssW||h!==cssH||d!==dpr){cssW=w;cssH=h;dpr=d;canvas.width=Math.round(w*d);canvas.height=Math.round(h*d);canvas.style.width=`${w}px`;canvas.style.height=`${h}px`;gl.viewport(0,0,canvas.width,canvas.height);}
       if(!drag){const forward=[Math.sin(yaw),0,-Math.cos(yaw)],right=[Math.cos(yaw),0,Math.sin(yaw)],speed=dt*4.7;if(keys.KeyW||keys.ArrowUp){eye[0]+=forward[0]*speed;eye[2]+=forward[2]*speed;}if(keys.KeyS||keys.ArrowDown){eye[0]-=forward[0]*speed;eye[2]-=forward[2]*speed;}if(keys.KeyA||keys.ArrowLeft){eye[0]-=right[0]*speed;eye[2]-=right[2]*speed;}if(keys.KeyD||keys.ArrowRight){eye[0]+=right[0]*speed;eye[2]+=right[2]*speed;}if(keys.KeyQ)eye[1]-=speed;if(keys.KeyE)eye[1]+=speed;if(keys.KeyW||keys.KeyS||keys.KeyA||keys.KeyD||keys.ArrowUp||keys.ArrowDown||keys.ArrowLeft||keys.ArrowRight){targetFocus=-1;$('#portalFocus').classList.remove('visible');$('#welcomeHud').classList.add('quiet');}}
       yaw+=Math.atan2(Math.sin(yawTarget-yaw),Math.cos(yawTarget-yaw))*.055;pitch+=(pitchTarget-pitch)*.055;pitch=Math.max(-.55,Math.min(.55,pitch));eye[0]=Math.max(-16,Math.min(16,eye[0]));eye[1]=Math.max(.6,Math.min(5,eye[1]));eye[2]=Math.max(-11,Math.min(5,eye[2]));
-      gl.disable(gl.DEPTH_TEST);gl.useProgram(skyP);gl.bindBuffer(gl.ARRAY_BUFFER,quad);gl.enableVertexAttribArray(skyL.pos);gl.vertexAttribPointer(skyL.pos,2,gl.FLOAT,false,0,0);const sky=getSky();gl.uniform2f(skyL.res,canvas.width,canvas.height);gl.uniform1f(skyL.time,now*.001*motion);gl.uniform1f(skyL.sky,sky.sky);gl.uniform1f(skyL.hour,sky.h);gl.uniform1f(skyL.moon,sky.phase);gl.drawArrays(gl.TRIANGLES,0,3);
+      gl.disable(gl.DEPTH_TEST);gl.useProgram(skyP);gl.bindBuffer(gl.ARRAY_BUFFER,quad);gl.enableVertexAttribArray(skyL.pos);gl.vertexAttribPointer(skyL.pos,2,gl.FLOAT,false,0,0);const sky=getSky();gl.uniform2f(skyL.res,canvas.width,canvas.height);gl.uniform1f(skyL.time,now*.001*motion);gl.uniform1f(skyL.hour,sky.h);gl.uniform1f(skyL.moon,sky.phase);gl.uniform1f(skyL.doy,sky.doy);updateFog(sunElevation(sky.h,sky.doy));gl.drawArrays(gl.TRIANGLES,0,3);
       gl.clear(gl.DEPTH_BUFFER_BIT);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);const proj=mat.persp(48*Math.PI/180,w/h,.1,100);const {view}=getView();const vp=mat.mul(proj,view);updateLabels(vp,w,h);drawOrbits(vp);drawGrid(vp);drawCore(vp,sceneTime);drawPortals(vp,sceneTime);
       if(hover>=0&&mouse.x>=0&&portalElements[hover]){world.style.cursor='pointer';}else world.style.cursor='';requestAnimationFrame(render);}
     world.addEventListener('pointerdown',e=>{mouse={x:e.clientX,y:e.clientY};if(e.target.closest('button,input,textarea,select,a,.welcome-hud,.portal-focus,.demo-hud,.setup-panel,.field-guide'))return;drag={x:e.clientX,y:e.clientY,moved:false};world.setPointerCapture?.(e.pointerId);});
     world.addEventListener('pointermove',e=>{mouse={x:e.clientX,y:e.clientY};if(drag){const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>3)drag.moved=true;if(drag.moved){yawTarget-=dx*.0042;pitchTarget+=dy*.0032;targetFocus=-1;$('#portalFocus').classList.remove('visible');$('#welcomeHud').classList.add('quiet');}drag.x=e.clientX;drag.y=e.clientY;}});
     world.addEventListener('pointerup',e=>{if(!drag)return;const moved=drag.moved;drag=null;if(!moved&&hover>=0){if($('#portalFocus').classList.contains('visible')&&sceneSelectIndex===hover)openSetup();else selectPortal(hover);}});
     world.addEventListener('pointercancel',()=>{drag=null;});
-    world.addEventListener('wheel',e=>{if(e.target.closest('#setupPanel,#fieldGuide')||$('#gameOverlay').classList.contains('open'))return;e.preventDefault();const d=e.deltaY>0?1:-1;eye[0]+=Math.sin(yaw)*d*.7;eye[2]-=Math.cos(yaw)*d*.7;targetFocus=-1;$('#portalFocus').classList.remove('visible');},{passive:false});
-    document.addEventListener('keydown',e=>{if(e.target.matches('input,textarea,select'))return;if(['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){keys[e.code]=true;e.preventDefault();}if(e.code==='Enter'&&$('#portalFocus').classList.contains('visible')&&!$('#gameOverlay').classList.contains('open'))openSetup();});
+    world.addEventListener('wheel',e=>{if(e.target.closest('#setupPanel,#fieldGuide,#guestbookPanel')||$('#gameOverlay').classList.contains('open'))return;e.preventDefault();const d=e.deltaY>0?1:-1;eye[0]+=Math.sin(yaw)*d*.7;eye[2]-=Math.cos(yaw)*d*.7;targetFocus=-1;$('#portalFocus').classList.remove('visible');},{passive:false});
+    // Camera keys must not hijack dialogs: while a panel is open, arrows scroll it and WASD stays inert.
+    const modalOpen=()=>['#gameOverlay','#setupPanel','#fieldGuide','#guestbookPanel'].some(s=>$(s)?.classList.contains('open'));
+    document.addEventListener('keydown',e=>{if(e.target?.matches?.('input,textarea,select')||modalOpen())return;if(['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){keys[e.code]=true;e.preventDefault();}if(e.code==='Enter'&&$('#portalFocus').classList.contains('visible'))openSetup();});
     const moveKey={up:'KeyW',down:'KeyS',left:'KeyA',right:'KeyD'};$$('[data-move]').forEach(btn=>{const code=moveKey[btn.dataset.move];btn.addEventListener('pointerdown',e=>{e.preventDefault();keys[code]=true;btn.setPointerCapture?.(e.pointerId);});const release=()=>{keys[code]=false;};btn.addEventListener('pointerup',release);btn.addEventListener('pointercancel',release);btn.addEventListener('lostpointercapture',release);});
     document.addEventListener('keyup',e=>{keys[e.code]=false;});window.addEventListener('blur',()=>keys={});
     $('#backToSky').addEventListener('click',()=>{resetWorld();});

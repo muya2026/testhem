@@ -1,22 +1,224 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#020610"><meta name="description" content="Seven social games, one 3D observatory. Play locally or with friends from anywhere, then share a branded scorecard."><meta name="author" content="@muya2026"><meta property="og:type" content="website"><meta property="og:site_name" content="testhem"><meta property="og:title" content="testhem — seven games in orbit"><meta property="og:description" content="Seven social games. One orbit. Your people. Play together, from anywhere."><meta property="og:image" content="https://muya2026.github.io/testhem/assets/testhem-social.png"><meta property="og:image:secure_url" content="https://muya2026.github.io/testhem/assets/testhem-social.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="testhem: Seven games. One orbit. Your people."><meta property="og:url" content="https://muya2026.github.io/testhem/"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="testhem — seven games in orbit"><meta name="twitter:description" content="Seven social games. One orbit. Your people."><meta name="twitter:image" content="https://muya2026.github.io/testhem/assets/testhem-social.png"><link rel="icon" type="image/svg+xml" href="assets/testhem-favicon.svg"><link rel="icon" type="image/png" sizes="180x180" href="assets/testhem-icon.png"><link rel="apple-touch-icon" href="assets/testhem-icon.png"><title>testhem — Social game observatory</title><link rel="stylesheet" href="style.css"></head>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#05070d">
+  <meta name="description" content="Seven social games, one 3D observatory. Play locally or with friends from anywhere, then share a branded scorecard.">
+  <meta name="author" content="@muya2026">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="testhem">
+  <meta property="og:title" content="testhem — seven games in orbit">
+  <meta property="og:description" content="Seven social games. One orbit. Your people. Play together, from anywhere.">
+  <meta property="og:image" content="https://muya2026.github.io/testhem/assets/testhem-social.png">
+  <meta property="og:image:secure_url" content="https://muya2026.github.io/testhem/assets/testhem-social.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="testhem: Seven games. One orbit. Your people.">
+  <meta property="og:url" content="https://muya2026.github.io/testhem/">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="testhem — seven games in orbit">
+  <meta name="twitter:description" content="Seven social games. One orbit. Your people.">
+  <meta name="twitter:image" content="https://muya2026.github.io/testhem/assets/testhem-social.png">
+  <link rel="icon" type="image/svg+xml" href="assets/testhem-favicon.svg">
+  <link rel="icon" type="image/png" sizes="180x180" href="assets/testhem-icon.png">
+  <link rel="apple-touch-icon" href="assets/testhem-icon.png">
+  <title>testhem — Social game observatory</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
 <body>
-  <canvas id="universe" aria-hidden="true"></canvas><div class="film-grain" aria-hidden="true"></div><div class="world-vignette" aria-hidden="true"></div>
-  <header class="top-hud"><a href="#" class="brand"><span class="brand-icon">✳</span><span>testhem</span><small id="observerName">OBSERVATORY 07</small></a><div class="sky-readout"><span class="sky-symbol" id="skyIcon">☾</span><span><b id="skyMood">NIGHT SIDE</b><small><span id="localClock">--:--</span> · <i id="timezone">LOCAL SKY</i></small></span></div><div class="top-actions"><button id="chooseGame" class="help-button choose-game-button">CHOOSE A GAME <span>↗</span></button><button id="guestbookOpen" class="help-button mark-wall-button">MARK WALL <span>♲</span></button><button id="returnView" class="help-button">RESET VIEW</button><button id="helpOpen" class="help-button">RULES <span>?</span></button></div></header>
+  <canvas id="universe" aria-hidden="true"></canvas>
+  <div class="film-grain" aria-hidden="true"></div>
+  <div class="world-vignette" aria-hidden="true"></div>
+
+  <header class="top-hud">
+    <a href="#" class="brand">
+      <span class="brand-icon">✳</span>
+      <span class="brand-word">testhem</span>
+      <small id="observerName">OBSERVATORY 07</small>
+    </a>
+    <div class="sky-readout">
+      <span class="sky-symbol" id="skyIcon">☾</span>
+      <span class="sky-copy"><b id="skyMood">NIGHT SIDE</b><small><span id="localClock">--:--</span> · <i id="timezone">LOCAL SKY</i></small></span>
+    </div>
+    <div class="top-actions">
+      <button type="button" id="chooseGame" class="help-button choose-game-button">CHOOSE A GAME <span>↗</span></button>
+      <button type="button" id="guestbookOpen" class="help-button mark-wall-button"><i class="mark-dot" aria-hidden="true"></i>MARK WALL</button>
+      <button type="button" id="returnView" class="help-button">RESET VIEW</button>
+      <button type="button" id="helpOpen" class="help-button help-icon-button" aria-label="Rules and field guide">?</button>
+    </div>
+  </header>
+
   <main id="world">
     <div class="world-labels" id="worldLabels" aria-label="Seven game portals"></div>
-    <section class="welcome-hud" id="welcomeHud"><div class="eyebrow"><span class="pulse"></span> YOUR FRIEND GROUP’S SOCIAL GAME UNIVERSE</div><h1>Enter<br><em>testhem.</em></h1><p class="personal-welcome"><strong id="welcomeName">Before you enter, tell us your name.</strong> We’ll save you a seat and make this observatory yours.</p><div class="identity-box"><label for="visitorName">YOUR NAME</label><div class="identity-entry"><input id="visitorName" maxlength="18" placeholder="What should we call you?" autocomplete="given-name"><button id="saveIdentity" type="button">SAVE NAME <span>↗</span></button></div><small id="identityHint">Your name becomes player one when you start a local table.</small></div><div class="welcome-actions"><button class="button-primary" id="playNow" disabled>CHOOSE A GAME <span>↗</span></button><button class="button-ghost" id="howToPlay">HOW TO PLAY <span>?</span></button></div><div class="mini-fact"><span>✳</span><span class="desktop-hint">DRAG TO LOOK · W A S D MOVE · SCROLL TO DRIFT</span><span class="mobile-hint">DRAG TO LOOK · CAMERA PAD TO MOVE</span></div></section>
-    <section class="portal-focus" id="portalFocus" aria-live="polite"><div class="focus-kicker"><span id="focusIndex">PORTAL 01 / 07</span><span class="focus-dot"></span><span>WORLD SELECTED</span><button id="backToSky">↩ SKY</button></div><span id="focusGameKicker" class="focus-game-kicker">THE BLUFFING CLASSIC</span><h2 id="focusGameTitle">Psych! The Truth Bluff</h2><p id="focusGameDescription">Answer a strange prompt honestly—or invent a lie your friends will buy. Can they tell?</p><div id="focusRules" class="focus-rules"></div><button class="button-primary" id="enterPortal">ENTER THIS GAME <span>↗</span></button></section>
-    <div class="scene-controls"><span class="control-key">W</span><span class="control-key">A</span><span class="control-key">S</span><span class="control-key">D</span><span>MOVE CAMERA</span><i></i><span>DRAG / LOOK</span><i></i><span>CLICK A PORTAL</span></div>
-    <div class="touch-pad" id="touchPad" aria-label="Move the camera"><button data-move="up" aria-label="Move forward">▲</button><button data-move="left" aria-label="Move left">◀</button><button data-move="right" aria-label="Move right">▶</button><button data-move="down" aria-label="Move backward">▼</button></div>
-    <div class="world-status"><span class="pulse"></span> <span id="worldStatusText">7 GAMES IN ORBIT · CLICK A NAME OR CHOOSE A GAME</span><span class="world-coords" id="worldCoords">X 00 · Z 00</span></div>
-    <section class="setup-panel" id="setupPanel" aria-hidden="true"><div class="setup-glass"><div class="setup-heading"><div><span class="small-label">PREPARE FOR DEPARTURE</span><h2 id="setupGameTitle">Psych! The Truth Bluff</h2></div><button class="close-panel" id="closeSetup" aria-label="Close">×</button></div><div class="setup-tabs"><button class="mode-tab active" data-mode="local">SAME ROOM <small>PASS THE DEVICE</small></button><button class="mode-tab" data-mode="online">FAR APART <small>PRIVATE ROOM</small></button></div>
-      <div class="mode-panel active" id="localPanel"><div class="setup-top"><span class="small-label">2–8 PLAYERS · NO ACCOUNT</span><span class="setup-glyph">◉</span></div><h3>Who’s in your crew?</h3><p class="player-hint" id="playerHint">Your name is saved as player one. Add one friend to start.</p><div class="player-entry"><input id="playerName" maxlength="18" placeholder="Add a friend’s name" autocomplete="off"><button id="addPlayer">ADD FRIEND <b>＋</b></button></div><div class="player-list" id="playerList"></div><div class="deck-picker" id="deckPicker"><span class="small-label">QUESTION VIBE</span><div class="deck-options"><button class="deck-option selected" data-deck="odd">ODDLY SPECIFIC <small>FUN + UNEXPECTED</small></button><button class="deck-option" data-deck="deep">DEEP ORBIT <small>THOUGHTFUL, OPTIONAL</small></button><button class="deck-option" data-deck="either">WOULD YOU RATHER <small>CHOICES + BLUFFS</small></button></div></div><button class="button-primary start-game" id="startLocal">START LOCAL GAME <span>↗</span></button><p class="setup-error" id="localError" aria-live="polite"></p></div>
-      <div class="mode-panel" id="onlinePanel"><p class="online-intro">Play any of the seven games across phones, tablets, and computers. Choose a game first, create a room, and share its private invite link. This needs the Supabase setup in <code>config.js</code>.</p><input class="online-name" id="onlineName" maxlength="18" placeholder="Your player name" autocomplete="off"><button class="button-primary start-game" id="createOnline">CREATE PRIVATE ROOM <span>↗</span></button><div class="join-divider">OR JOIN A CREW</div><input class="online-name" id="roomInvite" placeholder="Paste the private invite link" autocomplete="off"><button class="button-secondary start-game" id="joinOnline">JOIN ROOM ↗</button><p class="setup-error" id="onlineError" aria-live="polite"></p><p class="backend-note" id="backendNote">SETUP GUIDE: SUPABASE_SETUP.MD IN THE REPOSITORY</p></div></div></section>
-    <section class="field-guide" id="fieldGuide" aria-hidden="true"><div class="guide-card"><button id="helpClose" class="close-panel" aria-label="Close guide">×</button><span class="small-label">OBSERVATORY FIELD GUIDE · 07 WORLDS</span><h2>Every portal has<br>its own rules.</h2><div class="guide-grid" id="guideGrid"></div><div class="guide-foot">DEEP PROMPTS ARE OPTIONAL · ANY PLAYER CAN PASS · THIS IS A GAME, NOT A TEST <span class="author-byline">CREATED BY <a href="https://github.com/muya2026" target="_blank" rel="noopener noreferrer">@MUYA2026</a></span></div></div></section>
-    <div class="demo-hud" id="demoHud"><span class="small-label">A STRANGE SIGNAL · QUICK GUESS</span><p>Your friend says they accidentally led 12 tourists to a bubble-tea shop while pretending to be a tour guide. Real—or elite bluff?</p><div class="demo-actions" id="demoActions"><button data-demo="true">I BELIEVE IT</button><button data-demo="false">GREAT BLUFF</button></div><div class="demo-result" id="demoResult" aria-live="polite"></div></div>
+
+    <section class="welcome-hud" id="welcomeHud">
+      <div class="eyebrow"><span class="pulse"></span>YOUR FRIEND GROUP’S SOCIAL GAME UNIVERSE</div>
+      <h1>Enter<br><em>testhem.</em></h1>
+      <div class="welcome-rule" aria-hidden="true"><i></i></div>
+      <p class="personal-welcome"><strong id="welcomeName">Before you enter, tell us your name.</strong> We’ll save you a seat and make this observatory yours.</p>
+      <div class="identity-box">
+        <label for="visitorName">YOUR NAME</label>
+        <div class="identity-entry">
+          <input id="visitorName" maxlength="18" placeholder="What should we call you?" autocomplete="given-name">
+          <button type="button" id="saveIdentity">SAVE NAME <span>↗</span></button>
+        </div>
+        <small id="identityHint">Your name becomes player one when you start a local table.</small>
+      </div>
+      <div class="welcome-actions">
+        <button type="button" class="button-primary" id="playNow" disabled>CHOOSE A GAME <span>↗</span></button>
+        <button type="button" class="button-ghost" id="howToPlay">HOW TO PLAY <span>?</span></button>
+      </div>
+      <div class="mini-fact">
+        <span class="mini-fact-star">✳</span>
+        <span class="desktop-hint">DRAG TO LOOK · W A S D MOVE · SCROLL TO DRIFT</span>
+        <span class="mobile-hint">DRAG TO LOOK · CAMERA PAD TO MOVE</span>
+      </div>
+    </section>
+
+    <section class="portal-focus" id="portalFocus" aria-live="polite">
+      <div class="focus-kicker">
+        <span id="focusIndex">PORTAL 01 / 07</span>
+        <span class="focus-dot"></span>
+        <span>WORLD SELECTED</span>
+        <button type="button" id="backToSky">↩ SKY</button>
+      </div>
+      <span id="focusGameKicker" class="focus-game-kicker">THE BLUFFING CLASSIC</span>
+      <h2 id="focusGameTitle">Psych! The Truth Bluff</h2>
+      <p id="focusGameDescription">Answer a strange prompt honestly—or invent a lie your friends will buy. Can they tell?</p>
+      <div id="focusRules" class="focus-rules"></div>
+      <button type="button" class="button-primary" id="enterPortal">ENTER THIS GAME <span>↗</span></button>
+    </section>
+
+    <div class="scene-controls">
+      <span class="control-key">W</span><span class="control-key">A</span><span class="control-key">S</span><span class="control-key">D</span>
+      <span>MOVE CAMERA</span><i></i><span>DRAG / LOOK</span><i></i><span>CLICK A PORTAL</span>
+    </div>
+
+    <div class="touch-pad" id="touchPad" aria-label="Move the camera">
+      <button type="button" data-move="up" aria-label="Move forward">▲</button>
+      <button type="button" data-move="left" aria-label="Move left">◀</button>
+      <button type="button" data-move="right" aria-label="Move right">▶</button>
+      <button type="button" data-move="down" aria-label="Move backward">▼</button>
+    </div>
+
+    <div class="world-status">
+      <span class="pulse"></span>
+      <span id="worldStatusText">7 GAMES IN ORBIT · CLICK A NAME OR CHOOSE A GAME</span>
+      <span class="world-coords" id="worldCoords">X 00 · Z 00</span>
+    </div>
+
+    <section class="setup-panel" id="setupPanel" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="setupGameTitle">
+      <div class="setup-glass">
+        <div class="setup-heading">
+          <div>
+            <span class="small-label">PREPARE FOR DEPARTURE</span>
+            <h2 id="setupGameTitle">Psych! The Truth Bluff</h2>
+          </div>
+          <button type="button" class="close-panel" id="closeSetup" aria-label="Close">×</button>
+        </div>
+        <div class="setup-tabs">
+          <button type="button" class="mode-tab active" data-mode="local">SAME ROOM <small>PASS THE DEVICE</small></button>
+          <button type="button" class="mode-tab" data-mode="online">FAR APART <small>PRIVATE ROOM</small></button>
+        </div>
+        <div class="mode-panel active" id="localPanel">
+          <div class="setup-top"><span class="small-label">2–8 PLAYERS · NO ACCOUNT</span><span class="setup-glyph">◉</span></div>
+          <h3>Who’s in your crew?</h3>
+          <p class="player-hint" id="playerHint">Your name is saved as player one. Add one friend to start.</p>
+          <div class="player-entry">
+            <input id="playerName" maxlength="18" placeholder="Add a friend’s name" autocomplete="off">
+            <button type="button" id="addPlayer">ADD <b>＋</b></button>
+          </div>
+          <div class="player-list" id="playerList"></div>
+          <div class="deck-picker" id="deckPicker">
+            <span class="small-label">QUESTION VIBE</span>
+            <div class="deck-options">
+              <button type="button" class="deck-option selected" data-deck="odd">ODDLY SPECIFIC <small>FUN + UNEXPECTED</small></button>
+              <button type="button" class="deck-option" data-deck="deep">DEEP ORBIT <small>THOUGHTFUL, OPTIONAL</small></button>
+              <button type="button" class="deck-option" data-deck="either">WOULD YOU RATHER <small>CHOICES + BLUFFS</small></button>
+            </div>
+          </div>
+          <button type="button" class="button-primary start-game" id="startLocal">START LOCAL GAME <span>↗</span></button>
+          <p class="setup-error" id="localError" aria-live="polite"></p>
+        </div>
+        <div class="mode-panel" id="onlinePanel">
+          <p class="online-intro">Play any of the seven games across phones, tablets, and computers. Choose a game first, create a room, and share its private invite link. This needs the Supabase setup in <code>config.js</code>.</p>
+          <input class="online-name" id="onlineName" maxlength="18" placeholder="Your player name" autocomplete="off">
+          <button type="button" class="button-primary start-game" id="createOnline">CREATE PRIVATE ROOM <span>↗</span></button>
+          <div class="join-divider"><i></i><span>OR JOIN A CREW</span><i></i></div>
+          <input class="online-name" id="roomInvite" placeholder="Paste the private invite link" autocomplete="off">
+          <button type="button" class="button-secondary start-game" id="joinOnline">JOIN ROOM <span>↗</span></button>
+          <p class="setup-error" id="onlineError" aria-live="polite"></p>
+          <p class="backend-note" id="backendNote">SETUP GUIDE: SUPABASE_SETUP.MD IN THE REPOSITORY</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="field-guide" id="fieldGuide" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Observatory field guide">
+      <div class="guide-card">
+        <button type="button" id="helpClose" class="close-panel" aria-label="Close guide">×</button>
+        <span class="small-label">OBSERVATORY FIELD GUIDE · 07 WORLDS</span>
+        <h2>Every portal has<br>its own <em>rules.</em></h2>
+        <div class="guide-grid" id="guideGrid"></div>
+        <div class="guide-foot">DEEP PROMPTS ARE OPTIONAL · ANY PLAYER CAN PASS · THIS IS A GAME, NOT A TEST <span class="author-byline">CREATED BY <a href="https://github.com/muya2026" target="_blank" rel="noopener noreferrer">@MUYA2026</a></span></div>
+      </div>
+    </section>
+
+    <div class="demo-hud" id="demoHud">
+      <span class="small-label">A STRANGE SIGNAL · QUICK GUESS</span>
+      <p>Your friend says they accidentally led 12 tourists to a bubble-tea shop while pretending to be a tour guide. Real—or elite bluff?</p>
+      <div class="demo-actions" id="demoActions">
+        <button type="button" data-demo="true">I BELIEVE IT</button>
+        <button type="button" data-demo="false">GREAT BLUFF</button>
+      </div>
+      <div class="demo-result" id="demoResult" aria-live="polite"></div>
+    </div>
   </main>
-  <div class="game-overlay" id="gameOverlay" aria-hidden="true"><div class="game-shell"><div class="game-top"><a class="brand"><span class="brand-icon">✳</span> testhem</a><div class="room-meta"><span id="roomCodeLabel">LOCAL TABLE</span><span id="roundLabel">ROUND 1</span></div><button class="exit-game" id="exitGame" aria-label="Exit game">×</button></div><div class="game-content" id="gameContent"></div></div></div>
-  <section class="guestbook-overlay" id="guestbookPanel" aria-hidden="true"><div class="guestbook-card" role="dialog" aria-modal="true" aria-labelledby="guestbookTitle"><header class="guestbook-head"><div><span class="small-label">THE COMMUNITY DROP</span><h2 id="guestbookTitle">The <em>Trashbin</em></h2></div><button class="close-panel" id="guestbookClose" aria-label="Close mark wall">×</button></header><p class="guestbook-intro">A little place for the names and marks people choose to leave behind. Your mark is public only if you submit it and check the consent box.</p><div class="guestbook-status" id="guestbookStatus" aria-live="polite">Connecting to the mark wall…</div><div class="guestbook-list" id="guestbookList"></div><form class="mark-form" id="markForm"><div class="mark-fields"><label>DISPLAY NAME<input id="markName" maxlength="24" placeholder="Your name" autocomplete="nickname" required></label><label>YOUR MARK<textarea id="markText" maxlength="180" placeholder="Leave a small note, motto, or signature…" required></textarea></label></div><label class="honeypot" aria-hidden="true">Leave this field empty<input id="markWebsite" tabindex="-1" autocomplete="off"></label><label class="mark-consent"><input id="markConsent" type="checkbox"><span>I understand my display name and mark will be visible to anyone who visits this website.</span></label><button class="button-primary mark-submit" id="markSubmit" type="submit">DROP MY MARK <span>↗</span></button><p class="mark-error" id="markError" aria-live="polite"></p><small class="mark-privacy">No email or account is collected. You can leave without posting.</small></form><footer class="guestbook-foot">A PUBLIC WALL · KEEP IT KIND · NO PERSONAL CONTACT DETAILS</footer></div></section>
-  <div class="toast" id="toast" role="status" aria-live="polite"></div><script src="config.js"></script><script src="app.js"></script>
-</body></html>
+
+  <div class="game-overlay" id="gameOverlay" aria-hidden="true">
+    <div class="game-shell">
+      <div class="game-top">
+        <a class="brand"><span class="brand-icon">✳</span><span class="brand-word">testhem</span></a>
+        <div class="room-meta"><span id="roomCodeLabel">LOCAL TABLE</span><span id="roundLabel">ROUND 1</span></div>
+        <button type="button" class="exit-game" id="exitGame" aria-label="Exit game">×</button>
+      </div>
+      <div class="game-content" id="gameContent"></div>
+    </div>
+  </div>
+
+  <section class="guestbook-overlay" id="guestbookPanel" aria-hidden="true">
+    <div class="guestbook-card" role="dialog" aria-modal="true" aria-labelledby="guestbookTitle">
+      <header class="guestbook-head">
+        <div>
+          <span class="small-label">THE COMMUNITY DROP</span>
+          <h2 id="guestbookTitle">The <em>Trashbin</em></h2>
+        </div>
+        <button type="button" class="close-panel" id="guestbookClose" aria-label="Close mark wall">×</button>
+      </header>
+      <p class="guestbook-intro">A little place for the names and marks people choose to leave behind. Your mark is public only if you submit it and check the consent box.</p>
+      <div class="guestbook-status" id="guestbookStatus" aria-live="polite">Connecting to the mark wall…</div>
+      <div class="guestbook-list" id="guestbookList"></div>
+      <form class="mark-form" id="markForm">
+        <div class="mark-fields">
+          <label>DISPLAY NAME<input id="markName" maxlength="24" placeholder="Your name" autocomplete="nickname" required></label>
+          <label>YOUR MARK<textarea id="markText" maxlength="180" placeholder="Leave a small note, motto, or signature…" required></textarea></label>
+        </div>
+        <label class="honeypot" aria-hidden="true">Leave this field empty<input id="markWebsite" tabindex="-1" autocomplete="off"></label>
+        <label class="mark-consent"><input id="markConsent" type="checkbox"><span>I understand my display name and mark will be visible to anyone who visits this website.</span></label>
+        <button class="button-primary mark-submit" id="markSubmit" type="submit">DROP MY MARK <span>↗</span></button>
+        <p class="mark-error" id="markError" aria-live="polite"></p>
+        <small class="mark-privacy">No email or account is collected. You can leave without posting.</small>
+      </form>
+      <footer class="guestbook-foot">A PUBLIC WALL · KEEP IT KIND · NO PERSONAL CONTACT DETAILS</footer>
+    </div>
+  </section>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
