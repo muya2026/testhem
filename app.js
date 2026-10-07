@@ -164,9 +164,10 @@
     localAnswerIndex = 0; localVoteIndex = 0; localGate = false; pendingVotes = {}; currentPlayerId = null; closeSetup(); overlayOpen(); render();
   });
 
-  $('#exitGame').addEventListener('click', overlayClose);
-  $('#gameOverlay').addEventListener('click', e => { if (e.target === $('#gameOverlay')) overlayClose(); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#gameOverlay').classList.contains('open')) overlayClose(); });
+  const requestExit = () => { if (game?.mode === 'local' && game.stage !== 'reveal' && (game.submissions.length || game.votes.length) && !confirm('Leave this game? Answers from this round will be lost.')) return; overlayClose(); };
+  $('#exitGame').addEventListener('click', requestExit);
+  $('#gameOverlay').addEventListener('click', e => { if (e.target === $('#gameOverlay')) requestExit(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#gameOverlay').classList.contains('open')) requestExit(); });
 
   function onlineError(msg) { $('#onlineError').textContent = msg; }
   const config = () => window.TESTHEM_CONFIG || {};
@@ -175,7 +176,7 @@
   async function rpc(name, params) {
     const c = config(), apiKey = publicApiKey(); if (!c.supabaseUrl || !apiKey) throw new Error('Add the Supabase project URL and publishable key to config.js. Local games work without Supabase.');
     const headers = { apikey: apiKey, 'Content-Type': 'application/json' }; if (c.supabaseAnonKey) headers.Authorization = `Bearer ${c.supabaseAnonKey}`;
-    const response = await fetch(`${c.supabaseUrl.replace(/\/$/, '')}/rest/v1/rpc/${name}`, { method: 'POST', headers, body: JSON.stringify(params) });
+    const response = await fetch(`${String(c.supabaseUrl).trim().replace(/\/+$/, '').replace(/\/rest\/v1$/i, '')}/rest/v1/rpc/${name}`, { method: 'POST', headers, body: JSON.stringify(params) });
     let body; try { body = await response.json(); } catch { body = null; }
     if (!response.ok) throw new Error(body?.message || body?.details || 'Could not reach the game room. Check the database setup and invite link.');
     return body;
@@ -480,7 +481,7 @@
     if (game.stage === 'lobby') {
       const isHost = currentPlayerId === game.hostId;
       const url = `${location.origin}${location.pathname}${location.search}#join=${encodeURIComponent(remoteSession.code)}&key=${encodeURIComponent(remoteSession.key)}`;
-      root.innerHTML = `<div class="game-eyebrow">${esc(gameCatalog.find(m=>m.key===game.gameType)?.title||'PSYCH!')} · PRIVATE ROOM ${esc(remoteSession.code)}</div><h2>${isHost ? 'Your room is open.' : 'You made it.'}</h2><p class="game-sub">Invite friends anywhere. Each person joins on their own phone or computer. Two or more players to start; answers stay hidden until the reveal.</p><div class="online-code">${esc(remoteSession.code)} <button class="button-secondary" id="copyInvite">COPY INVITE LINK</button></div><div class="scoreboard">${game.players.map(p => `<span class="score-chip">${esc(p.name)}${p.id === game.hostId ? ' · HOST' : ''}</span>`).join('')}</div>${isHost ? `<div class="deck-picker"><span class="small-label">CHOOSE A DECK FOR ROUND ONE</span><div class="deck-options">${[['odd','ODDLY SPECIFIC'],['deep','DEEP ORBIT'],['either','WOULD YOU RATHER']].map(([k,v])=>`<button class="deck-option ${k===remoteDeck?'selected':''}" data-remote-deck="${k}">${v}</button>`).join('')}</div></div><div class="game-actions"><button class="button-primary" id="startOnlineRound" ${game.players.length<2?'disabled':''}>START THE ROUND <span>↗</span></button></div>` : `<div class="online-wait"><strong>WAITING FOR THE HOST</strong>The host will light the fuse when everyone is here.</div>`}<p class="setup-error" id="roomInlineError"></p>`;
+      root.innerHTML = `<div class="game-eyebrow">${esc(gameCatalog.find(m=>m.key===game.gameType)?.title||'PSYCH!')} · PRIVATE ROOM ${esc(remoteSession.code)}</div><h2>${isHost ? 'Your room is open.' : 'You made it.'}</h2><p class="game-sub">Invite friends anywhere. Each person joins on their own phone or computer. Two or more players to start; answers stay hidden until the reveal.</p><div class="online-code">${esc(remoteSession.code)} <button class="button-secondary" id="copyInvite">COPY INVITE LINK</button></div><div class="scoreboard">${game.players.map(p => `<span class="score-chip">${esc(p.name)}${p.id === game.hostId ? ' · HOST' : ''}</span>`).join('')}</div>${isHost && (game.gameType||'psych')==='psych' ? `<div class="deck-picker"><span class="small-label">CHOOSE A DECK FOR ROUND ONE</span><div class="deck-options">${[['odd','ODDLY SPECIFIC'],['deep','DEEP ORBIT'],['either','WOULD YOU RATHER']].map(([k,v])=>`<button class="deck-option ${k===remoteDeck?'selected':''}" data-remote-deck="${k}">${v}</button>`).join('')}</div></div>` : ''}${isHost ? `<div class="game-actions"><button class="button-primary" id="startOnlineRound" ${game.players.length<2?'disabled':''}>START THE ROUND <span>↗</span></button></div>` : `<div class="online-wait"><strong>WAITING FOR THE HOST</strong>The host will light the fuse when everyone is here.</div>`}<p class="setup-error" id="roomInlineError"></p>`;
       $('#copyInvite')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(url); toast('Private invite copied. Send it to your crew.'); } catch { toast(url); } });
       $$('[data-remote-deck]', root).forEach(b => b.addEventListener('click', () => { remoteDeck = b.dataset.remoteDeck; $$('[data-remote-deck]', root).forEach(x => x.classList.toggle('selected', x === b)); }));
       $('#startOnlineRound')?.addEventListener('click', async () => { await onlineAction('start', remoteRoundData(game.gameType||selectedGame,remoteDeck)); });
@@ -802,7 +803,7 @@ void main(){
     world.addEventListener('wheel',e=>{if(e.target.closest('#setupPanel,#fieldGuide,#guestbookPanel')||$('#gameOverlay').classList.contains('open'))return;e.preventDefault();const d=e.deltaY>0?1:-1;eye[0]+=Math.sin(yaw)*d*.7;eye[2]-=Math.cos(yaw)*d*.7;targetFocus=-1;$('#portalFocus').classList.remove('visible');},{passive:false});
     // Camera keys must not hijack dialogs: while a panel is open, arrows scroll it and WASD stays inert.
     const modalOpen=()=>['#gameOverlay','#setupPanel','#fieldGuide','#guestbookPanel'].some(s=>$(s)?.classList.contains('open'));
-    document.addEventListener('keydown',e=>{if(e.target?.matches?.('input,textarea,select')||modalOpen())return;if(['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){keys[e.code]=true;e.preventDefault();}if(e.code==='Enter'&&$('#portalFocus').classList.contains('visible'))openSetup();});
+    document.addEventListener('keydown',e=>{if(e.target?.matches?.('input,textarea,select')||modalOpen())return;if(['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){keys[e.code]=true;e.preventDefault();}if(e.code==='Enter'&&$('#portalFocus').classList.contains('visible')&&!e.target?.closest?.('button,a,input,textarea,select'))openSetup();});
     const moveKey={up:'KeyW',down:'KeyS',left:'KeyA',right:'KeyD'};$$('[data-move]').forEach(btn=>{const code=moveKey[btn.dataset.move];btn.addEventListener('pointerdown',e=>{e.preventDefault();keys[code]=true;btn.setPointerCapture?.(e.pointerId);});const release=()=>{keys[code]=false;};btn.addEventListener('pointerup',release);btn.addEventListener('pointercancel',release);btn.addEventListener('lostpointercapture',release);});
     document.addEventListener('keyup',e=>{keys[e.code]=false;});window.addEventListener('blur',()=>keys={});
     $('#backToSky').addEventListener('click',()=>{resetWorld();});
